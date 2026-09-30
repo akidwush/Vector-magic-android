@@ -77,6 +77,7 @@ import { configurePalette, openPalette } from "./ui/palette.js";
 // there is no white flash before the modules resolve); this is the module taking ownership of it.
 import "./ui/theme.js";
 import { installTraceUI } from "./trace/ui.js";
+import { installManualTraceUI } from "./manual-trace/ui.js";
 import {
   configureGallery, renderGalleryGrid, loadRasterToCanvas, loadFileToCanvas, canvasIsEmpty,
   copyToClipboard, downloadBlob, downloadUrl, revealInFileManager,
@@ -3160,6 +3161,7 @@ export { setStatus, api, refreshAll, viewports, measureFit, frameRect, outputPre
 window.hv = hv;
 window.editor = editor;
 installTraceUI({setStatus,downloadCurrentSvg});
+window.manualTraceUI = installManualTraceUI({editor,setStatus});
 // Handles exposed directly so in-browser automation / the E2E suite can drive
 // the app by bare name (module scope is otherwise private).
 window.viewports = viewports;

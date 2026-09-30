@@ -324,3 +324,122 @@ body {background:#080a0d;color:#edf7f3}
   .hv-node-anchor { stroke-width: 1.5 !important; }
   .hv-node-handle { stroke-width: 1.5 !important; }
 }
+
+
+/* ==========================================================================
+   Manual Trace Step 1 — Android foundation
+   Only three drawing modes + universal Fill/Stroke are exposed on phones.
+   The original Hector bars remain intact underneath for desktop and engine reuse.
+   ========================================================================== */
+.manual-trace-bar { display:none; }
+
+@media (max-width:620px) {
+  /* Replace the generic Hector phone toolstrip with a purpose-built tracing bar. */
+  .editor-grid > .toolstrip { display:none !important; }
+  .app.editor .editor-grid {
+    grid-template-rows: auto minmax(0,1fr) auto !important;
+  }
+
+  .manual-trace-bar {
+    grid-column:1 !important;
+    grid-row:3 !important;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    width:100%;
+    min-width:0;
+    min-height:64px;
+    box-sizing:border-box;
+    padding:7px 8px calc(7px + env(safe-area-inset-bottom));
+    overflow-x:auto;
+    overflow-y:hidden;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+    background:#090d0c;
+    border-top:1px solid #284038;
+    z-index:70;
+  }
+  .manual-trace-bar::-webkit-scrollbar { display:none; }
+
+  .manual-trace-tool,
+  .manual-paint-chip {
+    flex:0 0 auto;
+    min-height:48px;
+    border:1px solid #2d4039;
+    border-radius:13px;
+    background:#0c1210;
+    color:#dbe9e2;
+    font:700 11px/1 system-ui,sans-serif;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:7px;
+    padding:0 12px;
+    white-space:nowrap;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .manual-trace-tool {
+    min-width:82px;
+    flex-direction:column;
+    gap:3px;
+    padding:4px 10px;
+  }
+  .manual-tool-icon { font-size:20px; line-height:1; }
+
+  /* Active mode must be unmistakable — both colour and border change, with text kept visible. */
+  .manual-trace-tool.active,
+  .manual-trace-tool[aria-pressed="true"] {
+    background:#16a874;
+    color:#fff;
+    border-color:#43e2ad;
+    box-shadow:0 0 0 2px #20d89b33 inset;
+  }
+
+  .manual-trace-divider {
+    flex:0 0 1px;
+    width:1px;
+    height:34px;
+    background:#2b3d37;
+    margin:0 1px;
+  }
+
+  .manual-paint-chip {
+    min-width:78px;
+    justify-content:flex-start;
+    padding:0 10px;
+  }
+  .manual-paint-dot {
+    width:22px;
+    height:22px;
+    flex:0 0 22px;
+    border-radius:7px;
+    border:2px solid #ecfff7;
+    background:var(--manual-paint,transparent);
+    box-shadow:0 0 0 1px #0008;
+  }
+  .manual-paint-chip.none .manual-paint-dot {
+    background:
+      linear-gradient(45deg,transparent 43%,#ef4968 44% 56%,transparent 57%),
+      #fff;
+  }
+
+  /* Old floating swatches are replaced by the visible Fill/Stroke chips above. */
+  .tool-swatches { display:none !important; }
+
+  /* The contextual object strip remains available for now, but clear the new trace bar. */
+  .app.editor > .phone-ctxrow {
+    bottom:calc(72px + env(safe-area-inset-bottom)) !important;
+  }
+  .app.editor > .status-bar {
+    bottom:calc(72px + env(safe-area-inset-bottom)) !important;
+  }
+  .app.has-selection > .status-bar {
+    bottom:calc(124px + env(safe-area-inset-bottom)) !important;
+  }
+  .mobile-fab {
+    bottom:calc(74px + env(safe-area-inset-bottom)) !important;
+  }
+  .app.has-selection .mobile-fab {
+    bottom:calc(124px + env(safe-area-inset-bottom)) !important;
+  }
+}

@@ -24,11 +24,13 @@ jobs:
           node --check src/trace/ui.js
           node --check src/trace/import.js
           node --check src/trace/sanitize.js
+          node --check src/manual-trace/ui.js
       - name: Netlify static build
         run: |
           bash scripts/build-netlify.sh
           test -s dist/index.html
           test -s dist/src/trace/ui.js
+          test -s dist/src/manual-trace/ui.js
           test -s dist/studio.css
           test ! -e dist/netlify
       - name: Install Chromium QA
