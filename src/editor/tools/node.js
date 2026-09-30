@@ -236,31 +236,72 @@ export const nodeMixin = {
     if (!target) { setStatus("Select a Vector Layer first.", 1800); return false; }
     const x = Number(pt.x), y = Number(pt.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    const pa = pathToAnchors(target);
+    if (!pa.editable) { setStatus("This contour cannot accept a new point.", 1800); return false; }
+
+    // Search ONLY this Vector Layer (and, when Step 3 focused one, only that contour).
+    // nearestOnPaths(stage, …) can legitimately choose an imported Vector-Ink path
+    // underneath the manual layer, which made Add Point appear dead on traced artwork.
+    const cubic = (A, B, t) => {
+      const C1 = A.out || A, C2 = B.in || B, u = 1 - t;
+      return {
+        x: u*u*u*A.x + 3*u*u*t*C1.x + 3*u*t*t*C2.x + t*t*t*B.x,
+        y: u*u*u*A.y + 3*u*u*t*C1.y + 3*u*t*t*C2.y + t*t*t*B.y,
+      };
+    };
+    const focus = this._manualContourFocus?.id === target.getAttribute("data-hv-id")
+      ? this._manualContourFocus.sub : null;
+    let best = null;
+    for (let si = 0; si < pa.subs.length; si++) {
+      if (focus != null && si !== focus) continue;
+      const sb = pa.subs[si], segs = sb.closed ? sb.count : Math.max(0, sb.count - 1);
+      for (let j = 0; j < segs; j++) {
+        const i = sb.start + j;
+        const ni = (j === sb.count - 1) ? sb.start : i + 1;
+        const A = pa.anchors[i], B = pa.anchors[ni];
+        if (!A || !B) continue;
+        let localT = 0.5, localD = Infinity;
+        const steps = 28;
+        for (let q = 1; q < steps; q++) {
+          const t = q / steps, p = cubic(A, B, t), d = Math.hypot(p.x - x, p.y - y);
+          if (d < localD) { localD = d; localT = t; }
+        }
+        // A few cheap refinements are more than enough for finger/crosshair precision.
+        let span = 1 / steps;
+        for (let round = 0; round < 3; round++) {
+          let bt = localT, bd = localD;
+          for (const t0 of [localT - span, localT - span/2, localT + span/2, localT + span]) {
+            const t = Math.max(0.001, Math.min(0.999, t0));
+            const p = cubic(A, B, t), d = Math.hypot(p.x - x, p.y - y);
+            if (d < bd) { bd = d; bt = t; }
+          }
+          localT = bt; localD = bd; span *= 0.35;
+        }
+        if (!best || localD < best.d) best = { i, t: localT, d: localD, p: cubic(A, B, localT) };
+      }
+    }
     const m = this.stageCTM(), k = m ? Math.hypot(m.a, m.b) || 1 : 1;
-    const hit = nearestOnPaths(this.stage, x, y, 30 / k);
-    if (!hit || hit.mode !== "segment" || hit.el !== target) {
+    if (!best || best.d > 36 / k) {
       setStatus("Move the crosshair closer to this contour, then tap.", 1800);
       return false;
     }
-    const pa = pathToAnchors(target);
-    if (!pa.editable) { setStatus("This contour cannot accept a new point.", 1800); return false; }
+
     this.push("Add point");
-    splitCubicInsert(pa.anchors, pa.subs, hit.i, hit.t);
+    splitCubicInsert(pa.anchors, pa.subs, best.i, best.t);
     target.setAttribute("d", penAnchorsToD(pa.anchors, pa.subs));
     const id = target.getAttribute("data-hv-id");
     if (id) this.selection = new Set([id]);
     this.artboardSelected = false;
     this.mountNodeHandles();
 
-    // Select the newly inserted anchor by proximity to the split point. This also
-    // survives compound paths because each mounted node keeps its global flat index.
-    let best = null, bestD = Infinity;
+    // Select the new split anchor by proximity; compound-path flat indices stay intact.
+    let bestKey = null, bestD = Infinity;
     for (const [key, ent] of this._nodeEls || []) {
       if (ent.nd.id !== id) continue;
-      const d = Math.hypot(ent.nd.x - hit.x, ent.nd.y - hit.y);
-      if (d < bestD) { bestD = d; best = key; }
+      const d = Math.hypot(ent.nd.x - best.p.x, ent.nd.y - best.p.y);
+      if (d < bestD) { bestD = d; bestKey = key; }
     }
-    if (best) this._nodeSel = new Set([best]);
+    if (bestKey) this._nodeSel = new Set([bestKey]);
     this.mountNodeHandles(); this._renderInspector(); this._renderLayers();
     setStatus("Anchor added.", 1000);
     return true;
