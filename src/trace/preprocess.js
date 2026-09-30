@@ -5,15 +5,19 @@ const MAX_BLOB=2050*1024;
 const NORMALIZED=new WeakSet();
 const isCancelled=(signal)=>{if(signal?.aborted)throw new DOMException('Trace dibatalkan.','AbortError');};
 
-const readBuffer=(blob)=>new Promise((resolve,reject)=>{
-  if(blob && typeof blob.arrayBuffer==='function'){
-    blob.arrayBuffer().then(resolve,reject);return;
-  }
+const readWithFileReader=(blob)=>new Promise((resolve,reject)=>{
   const reader=new FileReader();
   reader.onload=()=>resolve(reader.result);
   reader.onerror=()=>reject(reader.error||new Error('File gambar tidak dapat dibaca.'));
   reader.readAsArrayBuffer(blob);
 });
+const readBuffer=async(blob)=>{
+  if(blob && typeof blob.arrayBuffer==='function'){
+    try{return await blob.arrayBuffer();}
+    catch{/* Android content providers occasionally recover through FileReader. */}
+  }
+  return readWithFileReader(blob);
+};
 const dataUrl=(blob)=>new Promise((resolve,reject)=>{
   const reader=new FileReader();
   reader.onload=()=>resolve(String(reader.result||''));
