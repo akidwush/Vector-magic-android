@@ -1211,12 +1211,12 @@ body {background:#080a0d;color:#edf7f3}
 
   .mobile-add-fab {
     display:grid;place-items:center;
-    position:fixed;right:22px;bottom:22px;z-index:210;
-    width:70px;height:70px;padding:0;
+    position:fixed;right:18px;bottom:18px;z-index:210;
+    width:56px;height:56px;padding:0;
     border:2px solid #16e4a6;border-radius:50%;
     background:#0d7a5f;color:#1affbd;
-    box-shadow:0 9px 26px #0009, inset 0 0 0 1px #063d31;
-    font:300 48px/1 system-ui,sans-serif;
+    box-shadow:0 7px 20px #0008, inset 0 0 0 1px #063d31;
+    font:300 38px/1 system-ui,sans-serif;
     touch-action:manipulation;
   }
   .app.manual-vector-mode .mobile-add-fab,
@@ -1290,16 +1290,31 @@ body {background:#080a0d;color:#edf7f3}
     display:flex;align-items:center;justify-content:space-between;min-height:38px;padding:0 5px 7px;
   }
   .mobile-object-head strong {font:650 14px system-ui,sans-serif;color:#e8eaf1}
+  .mobile-object-head-actions {display:flex;align-items:center;gap:6px}
   .mobile-object-head button {width:40px;height:36px;border:0;border-radius:9px;background:#24293a;color:#c9cedb;font-size:18px}
+  .mobile-object-head button.danger {color:#ff9d9d;background:#3a222b}
+  .mobile-shape-quick {
+    margin:0 0 10px;padding:9px 10px 8px;
+    border:1px solid #343a50;border-radius:13px;background:#202536;
+  }
+  .mobile-shape-quick-title {display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
+  .mobile-shape-quick-title strong {font:650 12px system-ui,sans-serif;color:#f1f2f6}
+  .mobile-shape-quick-title small {font:600 9px system-ui,sans-serif;color:#22dfa9}
+  .mobile-shape-quick label {
+    display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;align-items:center;
+    margin:7px 0;color:#d8dbe5;font:600 10px system-ui,sans-serif;
+  }
+  .mobile-shape-quick label input[type="range"] {grid-column:1/3;width:100%;margin:0;accent-color:#20dfa8}
+  .mobile-shape-quick output {color:#22e2aa;font-size:10px}
   .mobile-object-grid {
     display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;
   }
   .mobile-object-grid button {
-    min-height:116px;padding:10px 6px;border:0;border-radius:13px;
+    min-height:94px;padding:8px 6px;border:0;border-radius:12px;
     background:#252a3c;color:#e0e2e9;
     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
   }
-  .mobile-object-grid button span {font-size:38px;line-height:1;color:#f0f1f6}
+  .mobile-object-grid button span {font-size:32px;line-height:1;color:#f0f1f6}
   .mobile-object-grid button b {font:500 12px/1.25 system-ui,sans-serif;text-align:center}
   .mobile-object-detail>header {
     display:flex;align-items:center;gap:8px;min-height:45px;border-bottom:1px solid #303648;margin-bottom:12px
