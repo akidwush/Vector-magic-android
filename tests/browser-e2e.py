@@ -340,7 +340,7 @@ with sync_playwright() as p:
         # anchor on Contour 1; Delete removes that selected inserted anchor.
         before_add=page.evaluate("window.editor._nodeEls.size")
         midseg=page.evaluate("""() => {
-          const a=[...window.editor._nodeEls.values()].map(x=>({x:x.nd.x,y:x.nd.y})).sort((p,q)=>p.x-q.x);
+          const a=[...window.editor._nodeEls.values()].map(x=>({x:x.nd.x,y:x.nd.y}));
           return {x:(a[0].x+a[1].x)/2,y:(a[0].y+a[1].y)/2};
         }""")
         page.locator('[data-bezier-action="add"]').click()
