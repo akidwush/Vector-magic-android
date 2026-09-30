@@ -23,6 +23,91 @@ export const penMixin = {
     const remembered = this._manualVectorLayerId ? this.nodeById(this._manualVectorLayerId) : null;
     return remembered?.tagName?.toLowerCase() === "path" ? remembered : null;
   },
+  manualPaintTarget() {
+    return this._pen?.node || this.manualVectorLayerTarget();
+  },
+  manualPaintState(which) {
+    const target = which === "stroke" ? "stroke" : "fill";
+    const node = this.manualPaintTarget();
+    const opAttr = target === "stroke" ? "stroke-opacity" : "fill-opacity";
+    const paintKey = target === "stroke" ? "strokePaint" : "fillPaint";
+    const guideStroke = target === "stroke" && node?.getAttribute("data-manual-guide-stroke") === "1";
+    let color = guideStroke ? "none" : (node?.getAttribute(target) ?? this.style[target] ?? "none");
+    if (!color) color = "none";
+    const opRaw = node?.getAttribute(opAttr);
+    const alpha = opRaw == null ? 1 : Math.max(0, Math.min(1, parseFloat(opRaw) || 0));
+    const widthRaw = node ? parseFloat(node.getAttribute("stroke-width")) : Number(this.style.strokeWidth);
+    const width = guideStroke ? (Number(this.style.strokeWidth) || 0) : (Number.isFinite(widthRaw) ? widthRaw : (Number(this.style.strokeWidth) || 0));
+    let paint = null;
+    if (node && !guideStroke) paint = this.paintOf(node, target);
+    else if (this.style[paintKey]) paint = { kind: "gradient", spec: this.style[paintKey] };
+    else paint = color === "none" ? { kind: "none" } : { kind: "solid", color, opacity: alpha };
+    return { node, color, alpha, width, paint };
+  },
+  manualApplyPaint(which, paint, width) {
+    const target = which === "stroke" ? "stroke" : "fill";
+    const node = this.manualPaintTarget();
+    const opAttr = target === "stroke" ? "stroke-opacity" : "fill-opacity";
+    const paintKey = target === "stroke" ? "strokePaint" : "fillPaint";
+    const p = !paint ? { kind: "none" } : (typeof paint === "string" ? { kind: "solid", color: paint } : paint);
+    let strokeWidth = Number(width);
+    if (!Number.isFinite(strokeWidth)) strokeWidth = this.manualPaintState("stroke").width || 2;
+    if (target === "stroke") strokeWidth = Math.max(0, strokeWidth);
+
+    const applyNode = (n) => {
+      if (!n || this.isRaster(n)) return;
+      if (target === "stroke") n.removeAttribute("data-manual-guide-stroke");
+      if (!p || p.kind === "none" || (target === "stroke" && strokeWidth <= 0)) {
+        n.setAttribute(target, "none");
+        n.removeAttribute(opAttr);
+        if (target === "stroke") {
+          n.setAttribute("stroke-width", "0");
+          n.removeAttribute("vector-effect");
+        }
+      } else if (p.kind === "gradient") {
+        n.setAttribute(target, "url(#" + this._writeGradient(n, target, p.spec) + ")");
+        n.removeAttribute(opAttr);
+        if (target === "stroke") {
+          n.setAttribute("stroke-width", nfmt(strokeWidth || 2));
+          n.setAttribute("vector-effect", "non-scaling-stroke");
+          if (!n.hasAttribute("stroke-linejoin")) n.setAttribute("stroke-linejoin", "round");
+          if (!n.hasAttribute("stroke-linecap")) n.setAttribute("stroke-linecap", "round");
+        }
+      } else {
+        n.setAttribute(target, p.color || "#000000");
+        if (p.opacity != null && p.opacity < 1) n.setAttribute(opAttr, nfmt(Math.max(0, Math.min(1, p.opacity))));
+        else n.removeAttribute(opAttr);
+        if (target === "stroke") {
+          n.setAttribute("stroke-width", nfmt(strokeWidth || 2));
+          n.setAttribute("vector-effect", "non-scaling-stroke");
+          if (!n.hasAttribute("stroke-linejoin")) n.setAttribute("stroke-linejoin", "round");
+          if (!n.hasAttribute("stroke-linecap")) n.setAttribute("stroke-linecap", "round");
+        }
+      }
+    };
+    applyNode(node);
+
+    if (p && p.kind === "gradient") {
+      const first = p.spec?.stops?.[0];
+      if (first?.color) this.style[target] = first.color;
+      this.style[paintKey] = p.spec;
+    } else {
+      this.style[target] = p && p.kind === "solid" ? (p.color || "none") : "none";
+      this.style[paintKey] = null;
+    }
+    if (target === "stroke") this.style.strokeWidth = (p && p.kind !== "none" && strokeWidth > 0) ? strokeWidth : 0;
+    this._gcDefs();
+    this._renderInspector?.();
+    this.onInspect?.();
+    return true;
+  },
+  manualSetStrokeWidth(width) {
+    const state = this.manualPaintState("stroke");
+    const w = Math.max(0, Number(width) || 0);
+    let paint = state.paint;
+    if (w > 0 && (!paint || paint.kind === "none")) paint = { kind: "solid", color: "#1d1d1f", opacity: 1 };
+    return this.manualApplyPaint("stroke", w > 0 ? paint : { kind: "none" }, w);
+  },
   manualVectorLayerContours() {
     const node = this.manualVectorLayerTarget();
     if (!node) return { node: null, contours: [], editable: false, active: -1 };
@@ -79,9 +164,16 @@ export const penMixin = {
       this.beginCoalesce();
       this.selection = new Set(); this.artboardSelected = false; this._renderSelection();
       const node = document.createElementNS(SVG_NS, "path");
-      node.setAttribute("fill", "none");
-      node.setAttribute("stroke", "#1d1d1f");
-      node.setAttribute("stroke-width", "1.5");
+      node.setAttribute("fill", this.style.fill || "none");
+      if (this.style.stroke && this.style.stroke !== "none" && this.style.strokeWidth > 0) {
+        node.setAttribute("stroke", this.style.stroke);
+        node.setAttribute("stroke-width", nfmt(this.style.strokeWidth));
+      } else {
+        // Keep the draft visible while the real Stroke state remains None.
+        node.setAttribute("stroke", "#1d1d1f");
+        node.setAttribute("stroke-width", "1.5");
+        node.setAttribute("data-manual-guide-stroke", "1");
+      }
       node.setAttribute("vector-effect", "non-scaling-stroke");
       this._artHome().insertBefore(node, this._artBefore());
       this._pen = { node, pts: [], closed: false, dragging: false, manual: true };
