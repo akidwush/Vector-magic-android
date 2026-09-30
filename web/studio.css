@@ -695,3 +695,301 @@ body {background:#080a0d;color:#edf7f3}
   .manual-contour-dock:not([hidden]) { width:82px;right:5px; }
   .manual-contour-menu { right:90px;width:min(210px,calc(100vw - 105px)); }
 }
+
+
+/* ==========================================================================
+   Manual Trace Step 4 — immersive Alight-style vector workspace + real paint
+   ========================================================================== */
+.manual-vector-head,
+.manual-paint-sheet { display:none; }
+
+@media (max-width:620px) {
+  .manual-vector-head:not([hidden]) {
+    grid-column:1 !important;
+    grid-row:1 !important;
+    display:grid;
+    grid-template-columns:52px minmax(0,1fr) auto;
+    align-items:center;
+    min-height:54px;
+    padding:4px 7px;
+    border-bottom:1px solid #34394f;
+    background:#202536;
+    color:#f6f7fb;
+    z-index:124;
+  }
+  .manual-vector-head > button,
+  .manual-vector-head-actions button {
+    width:44px;height:44px;
+    border:0;border-radius:10px;
+    background:transparent;color:#f7f8fb;
+    font:400 28px/1 system-ui,sans-serif;
+  }
+  .manual-vector-head strong {
+    padding-left:5px;
+    font:650 17px/1 system-ui,sans-serif;
+  }
+  .manual-vector-head-actions {display:flex;gap:2px}
+  .manual-vector-head-actions button {font-size:23px;color:#dce0eb}
+
+  /* Editing gets its own screen inside the app: header / canvas / control pad / mode strip. */
+  .app.manual-vector-mode .editor-grid {
+    grid-template-rows:54px minmax(0,1fr) minmax(164px,30dvh) auto !important;
+    grid-template-columns:minmax(0,1fr) !important;
+    background:#121621;
+  }
+  .app.manual-vector-mode .editor-grid > .mobilebar {display:none !important}
+  .app.manual-vector-mode .editor-grid > .stage-wrap {
+    grid-column:1 !important;
+    grid-row:2 !important;
+    overflow:hidden !important;
+    background:#06080c !important;
+  }
+  .app.manual-vector-mode .stage-wrap .stage-toolbar,
+  .app.manual-vector-mode #rulers {display:none !important}
+  .app.manual-vector-mode .stage-wrap .stage-body,
+  .app.manual-vector-mode .stage-wrap .preview-frame,
+  .app.manual-vector-mode #output-preview {
+    height:100% !important;
+    min-height:0 !important;
+    background:#05070a !important;
+    background-image:none !important;
+  }
+  .app.manual-vector-mode .viewport-content {
+    background:#05070a !important;
+  }
+
+  /* No Hector chrome competing with point editing. */
+  .app.manual-vector-mode > .phone-ctxrow,
+  .app.manual-vector-mode > .status-bar,
+  .app.manual-vector-mode .mobile-fab,
+  .app.manual-vector-mode .studio-actions {
+    display:none !important;
+  }
+
+  /* Control Pad is a real lower editor pane, never an overlay over artwork. */
+  .app.manual-vector-mode .manual-control-pad:not([hidden]) {
+    grid-column:1 !important;
+    grid-row:3 !important;
+    position:relative !important;
+    inset:auto !important;
+    display:grid !important;
+    grid-template-rows:auto minmax(0,1fr);
+    width:100% !important;
+    height:100% !important;
+    min-height:0 !important;
+    box-sizing:border-box;
+    margin:0 !important;
+    padding:7px 94px 7px 7px !important;
+    border:0 !important;
+    border-top:1px solid #32384b !important;
+    border-radius:0 !important;
+    background:#24293a !important;
+    box-shadow:none !important;
+    backdrop-filter:none !important;
+    -webkit-backdrop-filter:none !important;
+    z-index:116;
+  }
+  .app.manual-vector-mode .manual-control-head {
+    min-height:34px;
+    padding:0 0 6px;
+  }
+  .app.manual-vector-mode .manual-control-head strong {
+    color:#d9dce5;
+    font-size:11px;
+  }
+  .app.manual-vector-mode .manual-control-head span {color:#8d93a4}
+  .app.manual-vector-mode .manual-control-actions button {
+    min-width:52px;min-height:30px;
+    border-color:#444b61;
+    background:#2a3043;
+    color:#f3f4f8;
+  }
+  .app.manual-vector-mode .manual-pad-surface {
+    position:relative;
+    width:100%;
+    height:auto !important;
+    min-height:0 !important;
+    border:1px solid #3a4054 !important;
+    border-radius:0 !important;
+    background:#272c3f !important;
+    color:#aeb2bf !important;
+  }
+  .app.manual-vector-mode .manual-pad-surface::before {
+    content:"";
+    position:absolute;
+    inset:12px;
+    border:
+      solid #aeb1bb;
+    border-width:0;
+    pointer-events:none;
+    opacity:.85;
+  }
+  .app.manual-vector-mode .manual-pad-surface span {
+    max-width:85%;
+    text-align:center;
+    font-size:17px;
+    font-weight:500;
+    color:#b4b7c1;
+  }
+  .app.manual-vector-mode .manual-pad-surface small {
+    font-size:10px;color:#767c8e;
+  }
+  .app.manual-vector-mode .manual-pad-surface.tracking {
+    background:#292f43 !important;
+    border-color:#09e7a7 !important;
+  }
+
+  /* The contour navigator occupies the right wall of the same lower pane. */
+  .app.manual-vector-mode .manual-contour-dock:not([hidden]) {
+    grid-column:1 !important;
+    grid-row:3 !important;
+    align-self:stretch !important;
+    justify-self:end !important;
+    position:relative !important;
+    inset:auto !important;
+    display:flex !important;
+    width:88px !important;
+    height:100% !important;
+    margin:0 !important;
+    padding:6px !important;
+    border:0 !important;
+    border-left:1px solid #343a50 !important;
+    border-radius:0 !important;
+    background:#1f2434f8 !important;
+    box-shadow:none !important;
+    z-index:119;
+  }
+  .app.manual-vector-mode .manual-contour-scroller {
+    flex:1;
+    grid-template-rows:30px minmax(78px,1fr) 30px;
+  }
+  .app.manual-vector-mode #manual-contour-range {
+    width:min(124px,21dvh);
+  }
+  .app.manual-vector-mode .manual-contour-title {
+    min-height:36px;
+    background:#292f42;
+    border-color:#444b61;
+  }
+  .app.manual-vector-mode .manual-contour-menu {
+    right:94px;
+    top:0;
+  }
+
+  /* Bottom mode strip remains thumb reachable; Back in the header replaces Select here. */
+  .app.manual-vector-mode .manual-trace-bar {
+    grid-column:1 !important;
+    grid-row:4 !important;
+    position:relative !important;
+    min-height:62px;
+    padding:6px 8px calc(6px + env(safe-area-inset-bottom)) !important;
+    background:#0d1118 !important;
+    border-top:1px solid #293044 !important;
+    z-index:123;
+  }
+  .app.manual-vector-mode .manual-trace-bar [data-manual-tool="select"] {display:none !important}
+  .app.manual-vector-mode .manual-trace-tool,
+  .app.manual-vector-mode .manual-paint-chip {
+    min-height:48px;
+    border-color:#31394c;
+    background:#111720;
+  }
+  .app.manual-vector-mode .manual-trace-tool.active {
+    background:#10b984;
+    border-color:#27e6aa;
+  }
+  .manual-paint-chip.active-paint {
+    border-color:#2be2aa !important;
+    box-shadow:0 0 0 1px #2be2aa66 inset;
+  }
+  .manual-paint-chip.gradient .manual-paint-dot {
+    background:
+      linear-gradient(135deg,var(--manual-paint),#fff) !important;
+  }
+
+  /* Paint is another lower pane, using the existing rich Hector colour engine. */
+  .app.manual-vector-mode .manual-paint-sheet:not([hidden]) {
+    grid-column:1 !important;
+    grid-row:3 !important;
+    display:grid !important;
+    grid-template-rows:auto auto minmax(0,1fr);
+    min-height:0;
+    overflow:hidden;
+    padding:7px 9px;
+    border-top:1px solid #343a50;
+    background:#24293a;
+    z-index:122;
+  }
+  .manual-paint-head {
+    min-height:38px;
+    display:grid;
+    grid-template-columns:40px minmax(0,1fr);
+    align-items:center;
+    gap:5px;
+  }
+  .manual-paint-head button {
+    width:38px;height:34px;border:0;border-radius:9px;
+    background:#30364a;color:#fff;font-size:22px;
+  }
+  .manual-paint-head div {display:flex;flex-direction:column;gap:2px}
+  .manual-paint-head strong {font:700 13px system-ui,sans-serif;color:#f3f5fa}
+  .manual-paint-head small {font:600 9px system-ui,sans-serif;color:#8f96aa}
+  .manual-stroke-width {
+    display:grid;
+    grid-template-columns:auto minmax(0,1fr) 34px;
+    align-items:center;
+    gap:8px;
+    padding:5px 2px 7px;
+    color:#d9dce7;
+    font:600 10px system-ui,sans-serif;
+  }
+  .manual-stroke-width[hidden] {display:none !important}
+  .manual-stroke-width input {width:100%;accent-color:#20dca3}
+  .manual-stroke-width output {text-align:right;color:#78e6be}
+  .manual-paint-picker {
+    min-height:0;
+    overflow:auto;
+  }
+  .manual-paint-picker .cp-window.cp-embedded {
+    position:static !important;
+    width:100% !important;
+    max-width:none !important;
+    min-width:0 !important;
+    height:auto !important;
+    margin:0 !important;
+    border:0 !important;
+    box-shadow:none !important;
+    background:transparent !important;
+  }
+  .manual-paint-picker .cp-head {display:none !important}
+  .manual-paint-picker .cp-body {min-height:108px}
+  .manual-paint-picker .cp-swatches,
+  .manual-paint-picker .cp-recent {padding-left:0;padding-right:0}
+
+  .app.manual-paint-open .manual-control-pad,
+  .app.manual-paint-open .manual-contour-dock {display:none !important}
+
+  /* Fill/Stroke also work from Select mode: use the same picker as a bottom sheet. */
+  .app.manual-paint-open:not(.manual-vector-mode) .manual-paint-sheet:not([hidden]) {
+    display:grid !important;
+    position:fixed !important;
+    left:0;right:0;bottom:calc(62px + env(safe-area-inset-bottom));
+    z-index:130;
+    max-height:58dvh;
+    grid-template-rows:auto auto minmax(0,1fr);
+    overflow:hidden;
+    padding:8px 10px;
+    border:1px solid #343a50;
+    border-radius:18px 18px 0 0;
+    background:#24293af8;
+    box-shadow:0 -12px 30px #0009;
+  }
+
+  /* Direct canvas touch remains forbidden in Pen; Edit Points only accepts nodes/handles. */
+  .app.manual-vector-mode .stage-wrap[data-tool="pen"] .preview-frame,
+  .app.manual-vector-mode .stage-wrap[data-tool="pen"] .viewport-content,
+  .app.manual-vector-mode .stage-wrap[data-tool="node"] .preview-frame,
+  .app.manual-vector-mode .stage-wrap[data-tool="node"] .viewport-content {
+    touch-action:none !important;
+  }
+}

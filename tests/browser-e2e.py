@@ -139,7 +139,18 @@ with sync_playwright() as p:
       page.wait_for_function("""window.editor.tool==='pen'
         && window.editor._manualTraceTouchMode==='pen'
         && !document.querySelector('#manual-control-pad').hidden
+        && !document.querySelector('#manual-vector-head').hidden
         && document.querySelector('#manual-trace-bar [data-manual-tool=pen]').getAttribute('aria-pressed')==='true'""")
+      immersive=page.evaluate(r'''() => {
+        const r=s=>document.querySelector(s)?.getBoundingClientRect();
+        const stage=r('.stage-wrap'),pad=r('#manual-control-pad');
+        return {head:getComputedStyle(document.querySelector('#manual-vector-head')).display,
+          mobile:getComputedStyle(document.querySelector('#mobile-top')).display,
+          rulers:getComputedStyle(document.querySelector('#rulers')).display,
+          stageBottom:stage?.bottom||0,padTop:pad?.top||0,padBottom:pad?.bottom||0};
+      }''')
+      assert immersive['head']!='none' and immersive['mobile']=='none' and immersive['rulers']=='none',immersive
+      assert immersive['padTop']>=immersive['stageBottom']-2,immersive
       svg_box=page.locator('svg.inline-svg').bounding_box()
       assert svg_box, 'SVG stage has no box'
       page.touchscreen.tap(svg_box['x']+svg_box['width']*.55,svg_box['y']+svg_box['height']*.55)
@@ -168,6 +179,42 @@ with sync_playwright() as p:
       page.wait_for_function("window.editor._pen?.pts?.length===2 && !document.querySelector('#manual-finish-path').disabled")
       page.locator('#manual-finish-path').click()
       page.wait_for_function("window.editor._pen===null && window.editor.selection.size===1")
+
+      # Step 4 on 390px: mobile Fill/Stroke must edit the remembered Vector Layer
+      # directly, not depend on Hector's hidden Colour dock selection state.
+      if width==390:
+        page.locator('#manual-fill').click()
+        page.wait_for_function("""!document.querySelector('#manual-paint-sheet').hidden
+          && document.querySelector('main.app').classList.contains('manual-paint-open')
+          && document.querySelector('#manual-paint-title').textContent.includes('Color')""")
+        hex_in=page.locator('#manual-paint-picker input[data-k="hex"]')
+        hex_in.fill('33cc88')
+        page.wait_for_function("""(window.editor.manualVectorLayerTarget()?.getAttribute('fill')||'').toLowerCase()==='#33cc88'""")
+        page.locator('#manual-paint-back').click()
+        page.wait_for_function("document.querySelector('#manual-paint-sheet').hidden")
+
+        page.locator('#manual-stroke').click()
+        page.wait_for_function("""!document.querySelector('#manual-paint-sheet').hidden
+          && !document.querySelector('#manual-stroke-width').hidden""")
+        page.evaluate("""() => {
+          const r=document.querySelector('#manual-stroke-range');
+          r.value='4';r.dispatchEvent(new Event('input',{bubbles:true}));
+        }""")
+        page.locator('#manual-paint-picker input[data-k="hex"]').fill('ff3366')
+        page.wait_for_function("""() => {
+          const p=window.editor.manualVectorLayerTarget();
+          return (p?.getAttribute('stroke')||'').toLowerCase()==='#ff3366'
+            && Math.abs(parseFloat(p?.getAttribute('stroke-width')||0)-4)<0.01;
+        }""")
+        page.locator('#manual-paint-back').click()
+        paint_state=page.evaluate("""() => {
+          const p=window.editor.manualVectorLayerTarget();
+          return {fill:p.getAttribute('fill'),stroke:p.getAttribute('stroke'),width:p.getAttribute('stroke-width'),
+            fillChip:document.querySelector('#manual-fill').style.getPropertyValue('--manual-paint'),
+            strokeChip:document.querySelector('#manual-stroke').style.getPropertyValue('--manual-paint')};
+        }""")
+        assert paint_state['fill'].lower()=='#33cc88' and paint_state['stroke'].lower()=='#ff3366' and float(paint_state['width'])==4,paint_state
+        print('PASS Manual Trace Step 4 390px: live Fill + Stroke + width use active Vector Layer')
 
       # Step 3 on 390px: append a second contour to the SAME Vector Layer, use the
       # Contour Scroller to focus it, edit it, and verify standard SVG export keeps both.
@@ -206,12 +253,17 @@ with sync_playwright() as p:
           && window.editor._nodeEls?.size===2
           && [...window.editor._nodeEls.values()].every(x=>x.nd.sub===1)""")
 
-        # Drag one focused node. Contour 1's serialized subpath must remain byte-identical.
+        # Select one node, then move it through the Alight-style Control Pad.
+        # Contour 1's serialized subpath must remain byte-identical.
         before_parts=page.evaluate("""() => (window.editor.manualVectorLayerTarget().getAttribute('d')||'').match(/M[^M]*/g)""")
         focused=page.locator('.hv-node-anchor').first.bounding_box()
         assert focused, 'focused contour has no node handle'
-        page.mouse.move(focused['x']+focused['width']/2,focused['y']+focused['height']/2)
-        page.mouse.down();page.mouse.move(focused['x']+focused['width']/2+12,focused['y']+focused['height']/2+7,steps=4);page.mouse.up()
+        page.touchscreen.tap(focused['x']+focused['width']/2,focused['y']+focused['height']/2)
+        page.wait_for_function("window.editor.manualSelectedNodeCount()===1")
+        node_pad=page.locator('#manual-pad-surface').bounding_box()
+        assert node_pad, 'Edit Points Control Pad missing'
+        px=node_pad['x']+node_pad['width']*.45;py=node_pad['y']+node_pad['height']*.5
+        page.mouse.move(px,py);page.mouse.down();page.mouse.move(px+42,py+22,steps=5);page.mouse.up()
         after_parts=page.evaluate("""() => (window.editor.manualVectorLayerTarget().getAttribute('d')||'').match(/M[^M]*/g)""")
         assert len(before_parts)==2 and len(after_parts)==2 and before_parts[0]==after_parts[0] and before_parts[1]!=after_parts[1],(before_parts,after_parts)
 
@@ -241,11 +293,11 @@ with sync_playwright() as p:
       # Background touch in Edit Points cannot start pinch/pan or create geometry.
       page.touchscreen.tap(svg_box['x']+4,svg_box['y']+4)
       assert not page.evaluate('Boolean(window.editor._touchGesture)')
-      page.locator('#manual-trace-bar [data-manual-tool="select"]').click()
-      page.wait_for_function("window.editor.tool==='select' && window.editor._manualTraceTouchMode===null")
+      page.locator('#manual-vector-back').click()
+      page.wait_for_function("window.editor.tool==='select' && window.editor._manualTraceTouchMode===null && document.querySelector('#manual-vector-head').hidden")
       if width==390:
-        # remove focused-node edit, appended contour, then initial manual path
-        page.evaluate('window.editor.undo();window.editor.undo();window.editor.undo()')
+        # remove Control-Pad node edit, appended contour, Stroke, Fill, then initial manual path
+        page.evaluate('window.editor.undo();window.editor.undo();window.editor.undo();window.editor.undo();window.editor.undo()')
       else:
         page.evaluate('window.editor.undo()')  # remove QA manual path; keep traced document
       print(f'PASS Manual Trace Step 2 {width}px: touch lock + Control Pad + node correction')
