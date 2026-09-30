@@ -40,6 +40,8 @@ jobs:
           grep -q 'Manual Trace Step 2' dist/studio.css
           grep -q 'manual-contour-dock' dist/index.html
           grep -q 'Manual Trace Step 3' dist/studio.css
+          grep -q 'manual-paint-sheet' dist/index.html
+          grep -q 'Manual Trace Step 4' dist/studio.css
           test -s dist/studio.css
           test ! -e dist/netlify
       - name: Install Chromium QA
