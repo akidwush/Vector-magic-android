@@ -106,7 +106,7 @@ export function installManualTraceUI({editor,setStatus}) {
     }
   }
   function ensurePaintHistory(){
-    if(editor._pen||paintCoalescing)return;
+    if(editor._pen||paintCoalescing||!editor.manualPaintTarget?.())return;
     editor.beginCoalesce();paintCoalescing=true;
   }
   function commitPaintHistory(){
