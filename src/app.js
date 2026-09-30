@@ -78,6 +78,7 @@ import { configurePalette, openPalette } from "./ui/palette.js";
 import "./ui/theme.js";
 import { installTraceUI } from "./trace/ui.js";
 import { installManualTraceUI } from "./manual-trace/ui.js";
+import { installAlightMobileUI } from "./mobile-editor/ui.js";
 import {
   configureGallery, renderGalleryGrid, loadRasterToCanvas, loadFileToCanvas, canvasIsEmpty,
   copyToClipboard, downloadBlob, downloadUrl, revealInFileManager,
@@ -3162,6 +3163,7 @@ window.hv = hv;
 window.editor = editor;
 installTraceUI({setStatus,downloadCurrentSvg});
 window.manualTraceUI = installManualTraceUI({editor,setStatus});
+window.alightMobileUI = installAlightMobileUI({editor,setStatus});
 // Handles exposed directly so in-browser automation / the E2E suite can drive
 // the app by bare name (module scope is otherwise private).
 window.viewports = viewports;
