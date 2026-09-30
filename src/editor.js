@@ -1365,55 +1365,93 @@ const editor = {
     const ah = ab ? (parseFloat(ab.getAttribute("height")) || vb.height) : vb.height;
     const size = Math.max(24, Math.min(aw, ah) * 0.24), r = size / 2;
     const cx = ax + aw / 2, cy = ay + ah / 2;
-    const fmt = (v) => nfmt(v);
-    const poly = (count, radius = r, rot = -Math.PI / 2) =>
-      Array.from({ length: count }, (_, i) => ({
-        x: cx + Math.cos(rot + i * Math.PI * 2 / count) * radius,
-        y: cy + Math.sin(rot + i * Math.PI * 2 / count) * radius,
-      }));
-    const pathOf = (pts, close = true) => pts.length
-      ? "M" + pts.map((p) => `${fmt(p.x)} ${fmt(p.y)}`).join(" L") + (close ? " Z" : "")
-      : "";
-    let d = "", label = "Shape", lineOnly = false;
+    const id = "n" + (++this.idSeq);
+    const node = document.createElementNS(SVG_NS, "path");
+    let label = "Shape", lineOnly = false;
+
+    node.setAttribute("data-hv-id", id);
+    let fill = this.style?.fill;
+    if (!fill || fill === "none") fill = "#d9dde7";
+    let stroke = this.style?.stroke, sw = Number(this.style?.strokeWidth) || 0;
+
+    // Keep standard mobile primitives parametric. This is the important UX win:
+    // a rectangle can become rounded from one slider without entering Edit Points.
     if (kind === "circle") {
-      const k = r * 0.5522847498;
-      d = `M${fmt(cx+r)} ${fmt(cy)} C${fmt(cx+r)} ${fmt(cy+k)} ${fmt(cx+k)} ${fmt(cy+r)} ${fmt(cx)} ${fmt(cy+r)} C${fmt(cx-k)} ${fmt(cy+r)} ${fmt(cx-r)} ${fmt(cy+k)} ${fmt(cx-r)} ${fmt(cy)} C${fmt(cx-r)} ${fmt(cy-k)} ${fmt(cx-k)} ${fmt(cy-r)} ${fmt(cx)} ${fmt(cy-r)} C${fmt(cx+k)} ${fmt(cy-r)} ${fmt(cx+r)} ${fmt(cy-k)} ${fmt(cx+r)} ${fmt(cy)} Z`;
       label = "Circle";
-    } else if (kind === "rounded-rect") {
-      const x=cx-r,y=cy-r,rr=size*.18,x2=cx+r,y2=cy+r;
-      d=`M${fmt(x+rr)} ${fmt(y)} H${fmt(x2-rr)} Q${fmt(x2)} ${fmt(y)} ${fmt(x2)} ${fmt(y+rr)} V${fmt(y2-rr)} Q${fmt(x2)} ${fmt(y2)} ${fmt(x2-rr)} ${fmt(y2)} H${fmt(x+rr)} Q${fmt(x)} ${fmt(y2)} ${fmt(x)} ${fmt(y2-rr)} V${fmt(y+rr)} Q${fmt(x)} ${fmt(y)} ${fmt(x+rr)} ${fmt(y)} Z`;
-      label="Rounded Rectangle";
-    } else if (kind === "rect") { d=pathOf([{x:cx-r,y:cy-r},{x:cx+r,y:cy-r},{x:cx+r,y:cy+r},{x:cx-r,y:cy+r}]); label="Rectangle";
-    } else if (kind === "triangle") { d=pathOf(poly(3)); label="Triangle";
-    } else if (kind === "pentagon") { d=pathOf(poly(5)); label="Pentagon";
-    } else if (kind === "hexagon") { d=pathOf(poly(6)); label="Hexagon";
+      node.setAttribute("data-hv-shape", "ellipse");
+      node.setAttribute("data-hv-start", "0"); node.setAttribute("data-hv-end", "0"); node.setAttribute("data-hv-inner", "0");
+      setShapeBox(node, cx - r, cy - r, size, size);
+    } else if (kind === "rect" || kind === "rounded-rect") {
+      label = kind === "rounded-rect" ? "Rounded Rectangle" : "Rectangle";
+      node.setAttribute("data-hv-shape", "rect");
+      node.setAttribute("data-hv-r", nfmt(kind === "rounded-rect" ? size * 0.18 : 0));
+      setShapeBox(node, cx - r, cy - r, size, size);
+    } else if (kind === "triangle" || kind === "pentagon" || kind === "hexagon") {
+      const sides = kind === "triangle" ? 3 : kind === "pentagon" ? 5 : 6;
+      label = kind === "triangle" ? "Triangle" : kind === "pentagon" ? "Pentagon" : "Hexagon";
+      node.setAttribute("data-hv-shape", "poly");
+      node.setAttribute("data-hv-sides", String(sides));
+      node.setAttribute("data-hv-rot", "0"); node.setAttribute("data-hv-corner", "0");
+      setShapeBox(node, cx - r, cy - r, size, size);
     } else if (kind === "star") {
-      const pts=[];for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,rr=i%2===0?r:r*.44;pts.push({x:cx+Math.cos(a)*rr,y:cy+Math.sin(a)*rr});}
-      d=pathOf(pts);label="Star";
-    } else if (kind === "line") { d=pathOf([{x:cx-r,y:cy},{x:cx+r,y:cy}],false);label="Line";lineOnly=true;
+      label = "Star";
+      node.setAttribute("data-hv-shape", "star");
+      node.setAttribute("data-hv-points", "5"); node.setAttribute("data-hv-inset", "0.5");
+      node.setAttribute("data-hv-rot", "0"); node.setAttribute("data-hv-corner", "0");
+      setShapeBox(node, cx - r, cy - r, size, size);
+    } else if (kind === "line") {
+      label = "Line"; lineOnly = true;
+      node.setAttribute("d", `M${nfmt(cx-r)} ${nfmt(cy)} L${nfmt(cx+r)} ${nfmt(cy)}`);
     } else return null;
 
+    node.setAttribute("data-hv-name", label);
+    if (lineOnly) {
+      fill = "none";
+      if (!stroke || stroke === "none") stroke = "#d9dde7";
+      sw = Math.max(sw, size * 0.035, 2);
+    }
+    node.setAttribute("fill", fill);
+    if (stroke && stroke !== "none" && sw > 0) {
+      node.setAttribute("stroke", stroke); node.setAttribute("stroke-width", nfmt(sw));
+      node.setAttribute("vector-effect", "non-scaling-stroke");
+      node.setAttribute("stroke-linejoin", "round"); node.setAttribute("stroke-linecap", "round");
+    } else node.setAttribute("stroke", "none");
+
     this.push("Add " + label);
-    const node=document.createElementNS(SVG_NS,"path");
-    const id="n"+(++this.idSeq);
-    node.setAttribute("data-hv-id",id);
-    node.setAttribute("data-hv-name",label);
-    node.setAttribute("d",d);
-    let fill=this.style?.fill;
-    if(!fill||fill==="none")fill="#d9dde7";
-    let stroke=this.style?.stroke,sw=Number(this.style?.strokeWidth)||0;
-    if(lineOnly){fill="none";if(!stroke||stroke==="none")stroke="#d9dde7";sw=Math.max(sw,size*.035,2);}
-    node.setAttribute("fill",fill);
-    if(stroke&&stroke!=="none"&&sw>0){
-      node.setAttribute("stroke",stroke);node.setAttribute("stroke-width",nfmt(sw));
-      node.setAttribute("vector-effect","non-scaling-stroke");
-      node.setAttribute("stroke-linejoin","round");node.setAttribute("stroke-linecap","round");
-    }else node.setAttribute("stroke","none");
-    this._artHome().insertBefore(node,this._artBefore());
-    this.selection=new Set([id]);this.artboardSelected=false;
-    this._renderSelection();this._renderInspector();this._renderLayers();
-    setStatus("Added "+label+".",1200);
+    this._artHome().insertBefore(node, this._artBefore());
+    this.selection = new Set([id]); this.artboardSelected = false;
+    this._renderSelection(); this._renderInspector(); this._renderLayers();
+    setStatus("Added " + label + ".", 1200);
     return node;
+  },
+
+  // Small stable API for the mobile shape panel. A hand-edited shape loses its
+  // data-hv-shape metadata, so these quick controls automatically disappear.
+  quickShapeInfo(node = this.selectedNodes()[0]) {
+    if (!isLiveShape(node)) return null;
+    const kind = shapeKind(node), box = shapeBox(node);
+    const maxCorner = Math.max(0, Math.min(Math.abs(box.w), Math.abs(box.h)) / 2);
+    const num = (key, fallback = 0) => {
+      const raw = node.getAttribute("data-hv-" + key);
+      const value = raw == null || raw === "" ? fallback : parseFloat(raw);
+      return Number.isFinite(value) ? value : fallback;
+    };
+    return {
+      kind, box, maxCorner,
+      radius: kind === "rect" ? (rectRadii(node)[0] || 0) : 0,
+      corner: num("corner", 0),
+      sides: Math.round(num("sides", 5)),
+      points: Math.round(num("points", 5)),
+      inset: num("inset", 0.5),
+      inner: num("inner", 0),
+    };
+  },
+  setQuickShapeParam(key, value) {
+    const node = this.selectedNodes()[0];
+    if (!isLiveShape(node)) return false;
+    setShapeParam(node, key, value);
+    this._renderSelection();
+    return true;
   },
 
   // A tracing reference behaves like a normal movable raster while editing, but is
