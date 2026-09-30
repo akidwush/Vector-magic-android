@@ -468,11 +468,22 @@ export const penMixin = {
     }
     if (!keep || pts.length < 2) { node.remove(); this.cancelCoalesce(); return; }
     node.setAttribute("d", penPathD(pts, closed, null));
-    node.setAttribute("fill", closed ? (this.style.fill || "none") : "none");
-    if (this.style.stroke && this.style.stroke !== "none" && this.style.strokeWidth > 0) {
+    node.removeAttribute("data-manual-guide-stroke");
+    if (closed && this.style.fillPaint) {
+      node.setAttribute("fill", "url(#" + this._writeGradient(node, "fill", this.style.fillPaint) + ")");
+    } else {
+      node.setAttribute("fill", closed ? (this.style.fill || "none") : "none");
+    }
+    if (this.style.strokeWidth > 0 && this.style.strokePaint) {
+      node.setAttribute("stroke", "url(#" + this._writeGradient(node, "stroke", this.style.strokePaint) + ")");
+      node.setAttribute("stroke-width", nfmt(this.style.strokeWidth));
+    } else if (this.style.stroke && this.style.stroke !== "none" && this.style.strokeWidth > 0) {
       node.setAttribute("stroke", this.style.stroke); node.setAttribute("stroke-width", nfmt(this.style.strokeWidth));
-    } else { node.setAttribute("stroke", "#1d1d1f"); node.setAttribute("stroke-width", "2"); }
-    node.setAttribute("vector-effect", "non-scaling-stroke");
+    } else {
+      node.setAttribute("stroke", "none"); node.setAttribute("stroke-width", "0");
+    }
+    if (this.style.strokeWidth > 0) node.setAttribute("vector-effect", "non-scaling-stroke");
+    else node.removeAttribute("vector-effect");
     node.setAttribute("stroke-linejoin", "round"); node.setAttribute("stroke-linecap", "round");
     const id = "n" + (++this.idSeq); node.setAttribute("data-hv-id", id);
     this.commitCoalesce("Pen path");
