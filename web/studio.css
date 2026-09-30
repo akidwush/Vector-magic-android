@@ -65,3 +65,262 @@ body {background:#080a0d;color:#edf7f3}
 .tool-button[data-tool='knife'],.tool-button[data-tool='eraser'],.tool-button[data-tool='blend'],
 .tool-button#act-union,.tool-button#act-subtract,.tool-button#act-intersect {display:none!important}
 .actionbar .tool-sep {display:none!important}
+
+
+/* ==========================================================================
+   Vector Studio Android shell
+   The upstream Hector phone shell uses vertical rails on both sides. That is
+   useful for a desktop-class editor, but hostile on a 360–412px phone. For
+   Vector Studio we spend vertical space instead: full-width canvas + compact
+   top controls + a horizontal bottom tool strip. The actual editor buttons are
+   preserved (no cloned handlers), so all existing tool wiring still works.
+   ========================================================================== */
+@media (max-width: 620px) {
+  /* Two real rows only: compact controls + canvas/tools. The contextual/status
+     surfaces float and therefore never steal permanent canvas height. */
+  .app.editor {
+    padding: 0 !important;
+    gap: 0 !important;
+    grid-template-rows: minmax(0, 1fr) !important;
+    background: #080a0d;
+  }
+  .app.editor > .topbar { display: none !important; }
+
+  .app.editor .editor-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: auto minmax(0, 1fr) auto !important;
+    min-height: 0;
+    width: 100%;
+  }
+
+  .editor-grid > .leftdock,
+  .editor-grid > .actionbar {
+    display: none !important;
+  }
+
+  /* Compact top strip: brand/file + undo + redo + fit only. */
+  .editor-grid > .mobilebar {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    display: flex !important;
+    min-height: 52px;
+    padding: 5px 112px 5px 8px !important; /* reserve Trace pill at right */
+    gap: 6px !important;
+    overflow: hidden !important;
+    border: 0 !important;
+    border-bottom: 1px solid #23342d !important;
+    background: #090d0c;
+  }
+  .mobilebar > .tool-sep,
+  .mobilebar [data-action="zoom-out"],
+  .mobilebar [data-action="actual"],
+  .mobilebar [data-action="zoom-in"],
+  .mobilebar #vp-selectall {
+    display: none !important;
+  }
+  .mobilebar .tool-button,
+  .mobilebar .menu-trigger.has-logo {
+    width: 42px !important;
+    height: 42px !important;
+    min-width: 42px;
+    border-radius: 11px;
+    font-size: 18px !important;
+  }
+  .mobilebar [data-action="fit"] { display: grid !important; }
+
+  /* Canvas owns the whole phone width. */
+  .editor-grid > .stage-wrap {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    border: 0 !important;
+  }
+  .stage-wrap .stage-body,
+  .stage-wrap .preview-frame,
+  #output-preview {
+    min-width: 0 !important;
+    min-height: 0 !important;
+  }
+  .stage-wrap .preview-frame {
+    padding: 0 !important;
+  }
+
+  /* Bottom toolbar: the same real Hector tool buttons, now thumb friendly. */
+  .editor-grid > .toolstrip {
+    grid-column: 1 !important;
+    grid-row: 3 !important;
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    z-index: 55;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 7px !important;
+    min-height: 60px;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom)) !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    border: 0 !important;
+    border-top: 1px solid #263a32 !important;
+    background: #090d0c !important;
+  }
+  .editor-grid > .toolstrip::-webkit-scrollbar { display: none; }
+  .editor-grid > .toolstrip .tool-sep { display: none !important; }
+  .editor-grid > .toolstrip .tool-button {
+    flex: 0 0 auto !important;
+    width: 46px !important;
+    height: 46px !important;
+    min-width: 46px;
+    border-radius: 12px;
+    font-size: 19px !important;
+    border-color: #2c4037 !important;
+  }
+  .editor-grid > .toolstrip .tool-button.tool-primary {
+    width: 48px !important;
+    height: 48px !important;
+    min-width: 48px;
+    font-size: 20px !important;
+  }
+
+  /* Keep only the simple Vector Studio creation/edit tools visible on a phone. */
+  .editor-grid > .toolstrip [data-tool="curvature"],
+  .editor-grid > .toolstrip [data-tool="artboard"],
+  .editor-grid > .toolstrip [data-tool="width"],
+  .editor-grid > .toolstrip [data-tool="envelope"],
+  .editor-grid > .toolstrip [data-tool="mesh"] {
+    display: none !important;
+  }
+
+  /* Main mode switch is reduced to one Trace pill. Canvas is already visible. */
+  .studio-actions {
+    top: 5px !important;
+    right: 7px !important;
+    bottom: auto !important;
+    left: auto !important;
+    transform: none !important;
+    z-index: 120;
+    padding: 0 !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+  #studio-canvas-button { display: none !important; }
+  #studio-trace-button {
+    min-width: 98px !important;
+    height: 42px !important;
+    min-height: 42px !important;
+    padding: 0 12px !important;
+    border-radius: 12px !important;
+    box-shadow: none !important;
+    font-size: 12px !important;
+  }
+
+  /* Selection actions become a temporary floating strip, not a permanent row. */
+  .app.editor > .phone-ctxrow {
+    position: fixed !important;
+    left: 8px;
+    right: 8px;
+    bottom: calc(68px + env(safe-area-inset-bottom));
+    z-index: 115;
+    min-width: 0 !important;
+    pointer-events: none;
+  }
+  .phone-ctxrow > .stage-toolbar {
+    display: none !important;
+  }
+  .app.has-selection .phone-ctxrow > .stage-toolbar {
+    display: flex !important;
+    pointer-events: auto;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    gap: 6px !important;
+    max-width: 100%;
+    padding: 5px 6px !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    scrollbar-width: none;
+    border: 1px solid #315344 !important;
+    border-radius: 14px;
+    background: #0c1612f2 !important;
+    box-shadow: 0 8px 24px #0008;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .app.has-selection .phone-ctxrow > .stage-toolbar::-webkit-scrollbar { display: none; }
+  .app.has-selection .phone-ctxrow > .stage-toolbar .tool-button {
+    flex: 0 0 auto !important;
+    width: 42px !important;
+    height: 42px !important;
+    border-radius: 11px;
+    font-size: 17px !important;
+  }
+  .app.has-selection .phone-ctxrow > .stage-toolbar .tool-vsep { display: none !important; }
+
+  /* The old teaching/status bar was ~70px high in the screenshot. Make it a
+     non-interactive toast above the bottom tools instead. */
+  .app.editor > .status-bar {
+    position: fixed !important;
+    left: 10px;
+    right: auto;
+    bottom: calc(72px + env(safe-area-inset-bottom));
+    z-index: 108;
+    width: min(78vw, 330px);
+    min-height: 0 !important;
+    padding: 6px 9px !important;
+    border: 1px solid #294237 !important;
+    border-radius: 10px;
+    background: #07110ddc !important;
+    box-shadow: 0 5px 18px #0007;
+    pointer-events: none;
+    flex-wrap: nowrap !important;
+  }
+  .app.has-selection > .status-bar {
+    bottom: calc(122px + env(safe-area-inset-bottom));
+  }
+  .app.editor > .status-bar #status-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    line-height: 1.3;
+  }
+  .app.editor > .status-bar .status-tools,
+  .app.editor > .status-bar #status-progress {
+    display: none !important;
+  }
+
+  /* Properties/Layers remain available as Hector's bottom sheet, but its FAB
+     no longer obscures artwork or the tool strip. */
+  .mobile-fab {
+    width: 42px !important;
+    height: 42px !important;
+    right: 10px !important;
+    bottom: calc(72px + env(safe-area-inset-bottom)) !important;
+    z-index: 110;
+    box-shadow: 0 5px 18px #0007;
+  }
+  .app.has-selection .mobile-fab {
+    bottom: calc(122px + env(safe-area-inset-bottom)) !important;
+  }
+
+  /* Swatches stay on-canvas but clear the floating controls. */
+  .tool-swatches {
+    right: 10px !important;
+    bottom: 58px !important;
+    transform: scale(.92);
+    transform-origin: bottom right;
+  }
+
+  /* Larger edit furniture on touch, without changing path geometry. */
+  .hv-node-anchor { stroke-width: 1.5 !important; }
+  .hv-node-handle { stroke-width: 1.5 !important; }
+}
