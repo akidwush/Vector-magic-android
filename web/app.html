@@ -434,8 +434,29 @@
         <div class="mobile-sheet-grab" aria-hidden="true"></div>
         <header class="mobile-object-head">
           <strong id="mobile-object-title">Vector Object</strong>
-          <button type="button" id="mobile-object-close" aria-label="Close">✕</button>
+          <span class="mobile-object-head-actions">
+            <button type="button" id="mobile-object-delete" class="danger" aria-label="Delete SVG layer" title="Delete layer">⌫</button>
+            <button type="button" id="mobile-object-close" aria-label="Close">✕</button>
+          </span>
         </header>
+        <section id="mobile-shape-quick" class="mobile-shape-quick" hidden aria-label="Shape controls">
+          <div class="mobile-shape-quick-title"><strong id="mobile-shape-kind">Shape</strong><small>Quick Shape</small></div>
+          <label id="mobile-shape-round-row">Roundness <output id="mobile-shape-round-value">0%</output>
+            <input id="mobile-shape-round" type="range" min="0" max="100" step="1" value="0" />
+          </label>
+          <label id="mobile-shape-sides-row" hidden>Sides <output id="mobile-shape-sides-value">5</output>
+            <input id="mobile-shape-sides" type="range" min="3" max="12" step="1" value="5" />
+          </label>
+          <label id="mobile-shape-points-row" hidden>Points <output id="mobile-shape-points-value">5</output>
+            <input id="mobile-shape-points" type="range" min="3" max="12" step="1" value="5" />
+          </label>
+          <label id="mobile-shape-inset-row" hidden>Inner Radius <output id="mobile-shape-inset-value">50%</output>
+            <input id="mobile-shape-inset" type="range" min="5" max="90" step="1" value="50" />
+          </label>
+          <label id="mobile-shape-inner-row" hidden>Hole <output id="mobile-shape-inner-value">0%</output>
+            <input id="mobile-shape-inner" type="range" min="0" max="90" step="1" value="0" />
+          </label>
+        </section>
         <div id="mobile-object-grid" class="mobile-object-grid">
           <button type="button" data-object-action="fill"><span>◒</span><b>Color &amp; Fill</b></button>
           <button type="button" data-object-action="border"><span>▣</span><b>Border &amp; Shadow</b></button>
