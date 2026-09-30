@@ -177,6 +177,11 @@ with sync_playwright() as p:
       page.mouse.move(x,y);page.mouse.down();page.mouse.move(x-52,y+32,steps=4);page.mouse.up()
       page.locator('#manual-pad-surface').click(position={'x':pad_box['width']*.52,'y':pad_box['height']*.52})
       page.wait_for_function("window.editor._pen?.pts?.length===2 && !document.querySelector('#manual-finish-path').disabled")
+      if width==390:
+        # Keep Contour 1 with a real middle anchor so Step 5 can exercise two-sided Bezier handles.
+        page.mouse.move(x,y);page.mouse.down();page.mouse.move(x+26,y-44,steps=4);page.mouse.up()
+        page.locator('#manual-pad-surface').click(position={'x':pad_box['width']*.48,'y':pad_box['height']*.46})
+        page.wait_for_function("window.editor._pen?.pts?.length===3")
       page.locator('#manual-finish-path').click()
       page.wait_for_function("window.editor._pen===null && window.editor.selection.size===1")
 
@@ -280,6 +285,81 @@ with sync_playwright() as p:
         }''')
         assert exported['liveMoves']==2 and exported['matching']==1 and exported['exportedMoves']>=2 and not exported['leaks'],exported
         print('PASS Manual Trace Step 3 390px: Add Contour + scroller focus + isolated edit + compound SVG export')
+
+        # Step 5: Curve/Bezier actions all run through the lower Control Pad.
+        step5_history=page.evaluate('window.editor.history.length')
+        page.evaluate("""() => {
+          const r=document.querySelector('#manual-contour-range');
+          r.value='1';r.dispatchEvent(new Event('input',{bubbles:true}));
+        }""")
+        page.wait_for_function("""window.editor._manualContourFocus?.sub===0
+          && window.editor._nodeEls?.size===3
+          && !document.querySelector('#manual-bezier-tools').hidden""")
+        bezier_box=page.locator('#manual-bezier-tools').bounding_box()
+        assert bezier_box and bezier_box['width']>=80,bezier_box
+
+        # Select the middle corner and turn it into a smooth point.
+        mid=page.locator('.hv-node-anchor').nth(1).bounding_box()
+        assert mid,'middle anchor missing'
+        page.touchscreen.tap(mid['x']+mid['width']/2,mid['y']+mid['height']/2)
+        page.wait_for_function("window.editor.manualSelectedNodeCount()===1 && window.editor.manualSelectedAnchorState().corner")
+        page.locator('[data-bezier-action="smooth"]').click()
+        page.wait_for_function("""window.editor.manualSelectedAnchorState().smooth
+          && window.editor.manualSelectedAnchorState().in
+          && window.editor.manualSelectedAnchorState().out""")
+
+        # Mirror = equal opposite handles; Control Pad moves OUT and mirrors IN.
+        page.locator('[data-bezier-action="mirror"]').click()
+        page.wait_for_function("""window.manualTraceUI.getBezierMode().handleRelation==='mirror'
+          && window.editor.manualSelectedAnchorState().mirrored
+          && !document.querySelector('#manual-handle-side').hidden""")
+        h0=page.evaluate("window.editor.manualSelectedAnchorState()")
+        node_pad=page.locator('#manual-pad-surface').bounding_box()
+        px=node_pad['x']+node_pad['width']*.48;py=node_pad['y']+node_pad['height']*.50
+        page.mouse.move(px,py);page.mouse.down();page.mouse.move(px+34,py-19,steps=4);page.mouse.up()
+        page.wait_for_function("window.editor.manualSelectedAnchorState().mirrored")
+        h1=page.evaluate("window.editor.manualSelectedAnchorState()")
+        assert h1['out']!=h0['out'],(h0,h1)
+
+        # Break = the chosen OUT handle moves independently, IN stays put.
+        page.locator('[data-bezier-action="break"]').click()
+        page.wait_for_function("window.manualTraceUI.getBezierMode().handleRelation==='break'")
+        b0=page.evaluate("window.editor.manualSelectedAnchorState()")
+        page.mouse.move(px,py);page.mouse.down();page.mouse.move(px-27,py+31,steps=4);page.mouse.up()
+        b1=page.evaluate("window.editor.manualSelectedAnchorState()")
+        assert b1['in']==b0['in'] and b1['out']!=b0['out'],(b0,b1)
+        assert b1['broken'],b1
+
+        # IN/OUT side switch is explicit; Corner retracts both handles again.
+        page.locator('[data-handle-side="in"]').click()
+        page.wait_for_function("window.manualTraceUI.getBezierMode().handleSide==='in'")
+        page.locator('[data-bezier-action="corner"]').click()
+        page.wait_for_function("window.editor.manualSelectedAnchorState().corner")
+
+        # Add Point: crosshair is positioned with Control Pad state, tap inserts a real
+        # anchor on Contour 1; Delete removes that selected inserted anchor.
+        before_add=page.evaluate("window.editor._nodeEls.size")
+        midseg=page.evaluate("""() => {
+          const a=[...window.editor._nodeEls.values()].map(x=>({x:x.nd.x,y:x.nd.y}));
+          return {x:(a[0].x+a[1].x)/2,y:(a[0].y+a[1].y)/2};
+        }""")
+        page.locator('[data-bezier-action="add"]').click()
+        page.wait_for_function("window.manualTraceUI.getBezierMode().nodeAction==='add' && document.querySelector('.manual-trace-crosshair')")
+        page.evaluate("(p)=>window.manualTraceUI.setCursor(p)",midseg)
+        page.locator('#manual-pad-surface').click(position={'x':node_pad['width']*.50,'y':node_pad['height']*.50})
+        page.wait_for_function(f"window.editor._nodeEls.size==={before_add+1} && window.editor.manualSelectedNodeCount()===1")
+        page.locator('[data-bezier-action="delete"]').click()
+        page.wait_for_function(f"window.editor._nodeEls.size==={before_add}")
+
+        # All Step 5 changes are ordinary history entries and round-trip back to the
+        # exact pre-Step-5 compound path; later legacy QA can continue unchanged.
+        page.evaluate("""base => {
+          while(window.editor.history.length>base) window.editor.undo();
+          window.manualTraceUI.syncTool();
+        }""",step5_history)
+        page.wait_for_function("""window.editor._manualContourFocus?.sub===0
+          && window.editor._nodeEls?.size===3""")
+        print('PASS Manual Trace Step 5 390px: Corner + Smooth + Mirror + Break + Add/Delete through Control Pad')
 
       # Edit Points: no viewport gesture; only enlarged anchor/Bezier handles are touch targets.
       page.locator('#manual-trace-bar [data-manual-tool="node"]').click()

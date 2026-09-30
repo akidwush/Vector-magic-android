@@ -153,6 +153,31 @@
           </div>
         </section>
 
+        <aside class="manual-bezier-tools" id="manual-bezier-tools" hidden aria-label="Curve and point tools">
+          <button type="button" data-bezier-action="corner" aria-pressed="false" title="Corner point">
+            <span class="manual-bezier-glyph">◇</span><small>Corner</small>
+          </button>
+          <button type="button" data-bezier-action="smooth" aria-pressed="false" title="Smooth point">
+            <span class="manual-bezier-glyph">⌒</span><small>Smooth</small>
+          </button>
+          <button type="button" data-bezier-action="mirror" aria-pressed="false" title="Mirrored handles">
+            <span class="manual-bezier-glyph">↔</span><small>Mirror</small>
+          </button>
+          <button type="button" data-bezier-action="break" aria-pressed="false" title="Broken handles">
+            <span class="manual-bezier-glyph">↯</span><small>Break</small>
+          </button>
+          <button type="button" data-bezier-action="add" aria-pressed="false" title="Add point with crosshair">
+            <span class="manual-bezier-glyph">＋</span><small>Add</small>
+          </button>
+          <button type="button" data-bezier-action="delete" aria-pressed="false" title="Delete selected point">
+            <span class="manual-bezier-glyph">−</span><small>Delete</small>
+          </button>
+          <div class="manual-handle-side" id="manual-handle-side" hidden aria-label="Bezier handle side">
+            <button type="button" data-handle-side="in" aria-pressed="false">IN</button>
+            <button type="button" data-handle-side="out" class="active" aria-pressed="true">OUT</button>
+          </div>
+        </aside>
+
         <section class="manual-paint-sheet" id="manual-paint-sheet" hidden aria-label="Vector paint">
           <div class="manual-paint-head">
             <button type="button" id="manual-paint-back" aria-label="Back">←</button>
