@@ -133,7 +133,7 @@ with sync_playwright() as p:
       assert shell['stageWidth'] >= width-2,shell
       assert shell['manualDisplay']=='none',shell
       assert shell['legacyToolsDisplay']=='none' and shell['actionDisplay']=='none',shell
-      assert shell['topHeight'] <= 56 and shell['addFab']>=64,shell
+      assert shell['topHeight'] <= 56 and 52<=shell['addFab']<=60,shell
       assert shell['studioActions']=='none',shell
 
       # Alight-style + shell: Shape / Media / Vector Drawing only.
@@ -142,19 +142,36 @@ with sync_playwright() as p:
       tabs=page.locator('#mobile-add-sheet [data-add-tab]').all_text_contents()
       assert tabs==['○△□♡Shape','▧Media','✒Vector Drawing'],tabs
 
-      # Quick Shape becomes a real editable SVG object and summons exactly the
-      # requested five object categories — no Presets or Effects.
+      # Quick Rectangle stays parametric: round it directly from the object panel,
+      # then delete the selected SVG layer without entering Edit Points.
       before_paths=page.evaluate("window.editor.stage.querySelectorAll('path').length")
-      page.locator('[data-add-shape="triangle"]').click()
+      page.locator('[data-add-shape="rect"]').click()
       page.wait_for_function("""!document.querySelector('#mobile-object-sheet').hidden
-        && window.editor.selection.size===1""")
+        && window.editor.selection.size===1
+        && window.editor.selectedNodes()[0]?.getAttribute('data-hv-shape')==='rect'
+        && !document.querySelector('#mobile-shape-quick').hidden""")
       after_paths=page.evaluate("window.editor.stage.querySelectorAll('path').length")
       assert after_paths==before_paths+1,(before_paths,after_paths)
+      d0=page.evaluate("window.editor.selectedNodes()[0].getAttribute('d')")
+      page.evaluate("""() => {
+        const r=document.querySelector('#mobile-shape-round');
+        r.value='72';r.dispatchEvent(new Event('input',{bubbles:true}));r.dispatchEvent(new Event('change',{bubbles:true}));
+      }""")
+      page.wait_for_function("""() => {
+        const n=window.editor.selectedNodes()[0];
+        return parseFloat(n?.getAttribute('data-hv-r')||0)>0;
+      }""")
+      rounded=page.evaluate("""() => {
+        const n=window.editor.selectedNodes()[0];
+        return {d:n.getAttribute('d'),r:parseFloat(n.getAttribute('data-hv-r')||0),
+          exportLeaks:/data-hv-(shape|r|bx|by|bw|bh)/.test(window.editor.serialize())};
+      }""")
+      assert rounded['r']>0 and rounded['d']!=d0 and not rounded['exportLeaks'],rounded
       actions=page.locator('#mobile-object-grid [data-object-action]').all_text_contents()
       assert actions==['◒Color & Fill','▣Border & Shadow','◇Blending & Opacity','↔Move & Transform','♢Edit Points'],actions
       assert 'Preset' not in ''.join(actions) and 'Effect' not in ''.join(actions),actions
-      page.locator('#mobile-object-close').click()
-      page.evaluate("window.editor.undo()")
+      page.locator('#mobile-object-delete').click()
+      page.wait_for_function(f"window.editor.stage.querySelectorAll('path').length==={before_paths} && window.editor.selection.size===0")
 
       # Media reference is kept on the live canvas but explicitly stripped from SVG export.
       page.locator('#mobile-add-fab').click()
