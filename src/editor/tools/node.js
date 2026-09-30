@@ -52,8 +52,14 @@ export const nodeMixin = {
     this.stage.querySelectorAll("path[data-hv-shape]").forEach((n) => { if (shapeWasEdited(n)) freezeShape(n); });
     this._bakeArtTransforms();                     // normalize translates so handles align with the shapes
     const accept = this._nodeFocusAccept();
-    const pnodes = pathNodes(this.stage, accept);  // path anchors carry bezier direction handles
+    let pnodes = pathNodes(this.stage, accept);  // path anchors carry bezier direction handles
     const anchors = collectAnchors(this.stage, accept);   // rect/ellipse/line/polygon corner points
+    // Manual Trace can focus exactly one contour (subpath) of a compound Vector Layer.
+    // Keep the global flat anchor index in nd.k, but only mount handles from nd.sub.
+    const contourFocus = this._manualContourFocus;
+    if (contourFocus && contourFocus.id) {
+      pnodes = pnodes.filter((nd) => nd.id !== contourFocus.id || nd.sub === contourFocus.sub);
+    }
     const total = pnodes.length + anchors.length;
     if (!total) return;
     // Level-of-detail + viewport culling so a huge traced path (10k+ anchors) is
