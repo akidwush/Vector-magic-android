@@ -8,7 +8,7 @@
 // this._renderSelection) by identity. Only module-level helpers are imported.
 import {
   SVG_NS, MAX_HANDLES, nfmt, penPathD, penAnchorsToD, pathToAnchors, pathNodes, collectAnchors,
-  nearestOnPaths, shapeWasEdited, freezeShape, subOf, rebuildSubs,
+  nearestOnPaths, splitCubicInsert, shapeWasEdited, freezeShape, subOf, rebuildSubs,
 } from "../../hv/index.js";
 import { setStatus } from "../../app.js";
 import { snap45 } from "../snap.js";
@@ -127,6 +127,143 @@ export const nodeMixin = {
     }
     if (moved) this._renderInspector?.();
     return moved;
+  },
+  manualSelectedPathAnchor() {
+    if (this.tool !== "node" || !this._nodeSel || this._nodeSel.size !== 1) return null;
+    const key = [...this._nodeSel][0];
+    const cut = key.lastIndexOf("#");
+    if (cut < 0) return null;
+    const id = key.slice(0, cut), k = Number(key.slice(cut + 1));
+    const el = this.nodeById(id);
+    if (!el || el.tagName?.toLowerCase() !== "path" || !Number.isInteger(k)) return null;
+    const pa = pathToAnchors(el);
+    if (!pa.editable || k < 0 || k >= pa.anchors.length) return null;
+    return { key, id, k, el, pa, anchor: pa.anchors[k], ent: this._nodeEls?.get(key) || null };
+  },
+  manualSelectedAnchorState() {
+    const sel = this.manualSelectedPathAnchor();
+    if (!sel) return { selected: false, corner: false, smooth: false, mirrored: false, broken: false, in: null, out: null };
+    const A = sel.anchor;
+    const real = (h) => h && Math.hypot(h.x - A.x, h.y - A.y) > 1e-6;
+    const ih = real(A.in) ? A.in : null, oh = real(A.out) ? A.out : null;
+    if (!ih && !oh) return { selected: true, corner: true, smooth: false, mirrored: false, broken: false, in: null, out: null };
+    if (!(ih && oh)) return { selected: true, corner: false, smooth: true, mirrored: false, broken: false, in: ih, out: oh };
+    const ix = ih.x - A.x, iy = ih.y - A.y, ox = oh.x - A.x, oy = oh.y - A.y;
+    const il = Math.hypot(ix, iy), ol = Math.hypot(ox, oy);
+    const dot = il > 1e-6 && ol > 1e-6 ? (ix * ox + iy * oy) / (il * ol) : 1;
+    const collinear = dot < -0.985;
+    const equal = Math.abs(il - ol) <= Math.max(0.001, Math.max(il, ol) * 0.02);
+    return {
+      selected: true,
+      corner: false,
+      smooth: collinear,
+      mirrored: collinear && equal,
+      broken: !collinear,
+      in: { x: ih.x, y: ih.y },
+      out: { x: oh.x, y: oh.y }
+    };
+  },
+  manualSetSelectedAnchorType(type) {
+    if (type !== "corner" && type !== "smooth") return false;
+    return this.setSelectedAnchorsType(type);
+  },
+  manualSetHandleRelation(mode, side = "out") {
+    if (mode !== "mirror" && mode !== "break") return false;
+    const sel = this.manualSelectedPathAnchor();
+    if (!sel) { setStatus("Select one anchor first.", 1800); return false; }
+    const { el, pa, k } = sel;
+    const A = pa.anchors[k];
+    const real = (h) => h && Math.hypot(h.x - A.x, h.y - A.y) > 1e-6;
+    let changed = false;
+
+    // A corner has nothing for the pad to grab. Seed a conventional smooth tangent
+    // from this anchor's neighbours first, but keep it standard cubic SVG geometry.
+    if (!real(A.in) && !real(A.out)) {
+      const sb = subOf(pa.anchors, pa.subs, k), rel = k - sb.start;
+      const P = sb.closed ? pa.anchors[sb.start + (rel - 1 + sb.count) % sb.count] : (rel > 0 ? pa.anchors[k - 1] : null);
+      const N = sb.closed ? pa.anchors[sb.start + (rel + 1) % sb.count] : (rel < sb.count - 1 ? pa.anchors[k + 1] : null);
+      let dx = 1, dy = 0;
+      if (P && N) { dx = N.x - P.x; dy = N.y - P.y; }
+      else if (N) { dx = N.x - A.x; dy = N.y - A.y; }
+      else if (P) { dx = A.x - P.x; dy = A.y - P.y; }
+      const len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
+      const dPrev = P ? Math.hypot(A.x - P.x, A.y - P.y) / 3 : (N ? Math.hypot(N.x - A.x, N.y - A.y) / 3 : 24);
+      const dNext = N ? Math.hypot(N.x - A.x, N.y - A.y) / 3 : (P ? Math.hypot(A.x - P.x, A.y - P.y) / 3 : 24);
+      if (P) A.in = { x: A.x - ux * dPrev, y: A.y - uy * dPrev };
+      if (N) A.out = { x: A.x + ux * dNext, y: A.y + uy * dNext };
+      changed = true;
+    }
+
+    // Mirror means equal-length opposite handles. Break is intentionally a BEHAVIOUR
+    // mode: if handles already exist it changes no SVG until the user swipes one side.
+    if (mode === "mirror") {
+      const src = side === "in" ? (real(A.in) ? A.in : A.out) : (real(A.out) ? A.out : A.in);
+      if (src) {
+        if (side === "in") {
+          A.in = { x: src.x, y: src.y };
+          A.out = { x: 2 * A.x - src.x, y: 2 * A.y - src.y };
+        } else {
+          A.out = { x: src.x, y: src.y };
+          A.in = { x: 2 * A.x - src.x, y: 2 * A.y - src.y };
+        }
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.push(mode === "mirror" ? "Mirror handles" : "Create handles");
+      el.setAttribute("d", penAnchorsToD(pa.anchors, pa.subs));
+      this.mountNodeHandles(); this._renderInspector();
+    }
+    return true;
+  },
+  manualMoveSelectedHandle(side, dx, dy, mirror = false) {
+    const sel = this.manualSelectedPathAnchor();
+    if (!sel) return false;
+    const ent = this._nodeEls?.get(sel.key);
+    if (!ent) return false;
+    const mx = Number(dx), my = Number(dy);
+    if (!Number.isFinite(mx) || !Number.isFinite(my) || (!mx && !my)) return false;
+    const h = side === "in" ? ent.nd.inH : ent.nd.outH;
+    if (!h) return false;
+    if (side === "in") ent.nd.setIn(h.x + mx, h.y + my, !!mirror);
+    else ent.nd.setOut(h.x + mx, h.y + my, !!mirror);
+    this._syncNodeEls(ent, ent.nd.x, ent.nd.y);
+    return true;
+  },
+  manualAddPointAt(pt) {
+    if (this.tool !== "node" || !this.stage || !pt) return false;
+    const target = this.manualVectorLayerTarget?.();
+    if (!target) { setStatus("Select a Vector Layer first.", 1800); return false; }
+    const x = Number(pt.x), y = Number(pt.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    const m = this.stageCTM(), k = m ? Math.hypot(m.a, m.b) || 1 : 1;
+    const hit = nearestOnPaths(this.stage, x, y, 30 / k);
+    if (!hit || hit.mode !== "segment" || hit.el !== target) {
+      setStatus("Move the crosshair closer to this contour, then tap.", 1800);
+      return false;
+    }
+    const pa = pathToAnchors(target);
+    if (!pa.editable) { setStatus("This contour cannot accept a new point.", 1800); return false; }
+    this.push("Add point");
+    splitCubicInsert(pa.anchors, pa.subs, hit.i, hit.t);
+    target.setAttribute("d", penAnchorsToD(pa.anchors, pa.subs));
+    const id = target.getAttribute("data-hv-id");
+    if (id) this.selection = new Set([id]);
+    this.artboardSelected = false;
+    this.mountNodeHandles();
+
+    // Select the newly inserted anchor by proximity to the split point. This also
+    // survives compound paths because each mounted node keeps its global flat index.
+    let best = null, bestD = Infinity;
+    for (const [key, ent] of this._nodeEls || []) {
+      if (ent.nd.id !== id) continue;
+      const d = Math.hypot(ent.nd.x - hit.x, ent.nd.y - hit.y);
+      if (d < bestD) { bestD = d; best = key; }
+    }
+    if (best) this._nodeSel = new Set([best]);
+    this.mountNodeHandles(); this._renderInspector(); this._renderLayers();
+    setStatus("Anchor added.", 1000);
+    return true;
   },
   _refreshNodeSelHighlight() {
     if (!this._nodeEls) return;
