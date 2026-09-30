@@ -156,6 +156,45 @@ with sync_playwright() as p:
       page.touchscreen.tap(svg_box['x']+svg_box['width']*.55,svg_box['y']+svg_box['height']*.55)
       assert page.evaluate('window.editor._pen===null'), 'canvas touch illegally started Pen path'
 
+      # Navigation Step 1: the magnifier is an explicit mode switch. Draw remains
+      # locked by default; Pan & Zoom consumes canvas touches without creating geometry.
+      nav_box=page.locator('#manual-nav-toggle').bounding_box()
+      assert nav_box and nav_box['width']>=40,nav_box
+      page.locator('#manual-nav-toggle').click()
+      page.wait_for_function("""window.editor._manualTraceNavMode===true
+        && document.querySelector('#manual-nav-toggle').getAttribute('aria-pressed')==='true'
+        && document.querySelector('main.app').classList.contains('manual-panzoom-mode')""")
+      nav_result=page.evaluate(r'''() => {
+        const el=document.querySelector('#output-preview');
+        const content=el.querySelector('.viewport-content');
+        const r=el.getBoundingClientRect();
+        const fire=(type,id,x,y)=>el.dispatchEvent(new PointerEvent(type,{
+          bubbles:true,cancelable:true,composed:true,pointerId:id,pointerType:'touch',
+          button:0,buttons:(type==='pointerup'||type==='pointercancel')?0:1,
+          clientX:x,clientY:y
+        }));
+        const read=()=>content?.style.transform||'';
+        const before=read(),cx=r.left+r.width*.52,cy=r.top+r.height*.48;
+        fire('pointerdown',901,cx,cy);
+        fire('pointermove',901,cx+38,cy+21);
+        fire('pointerup',901,cx+38,cy+21);
+        const afterPan=read();
+        fire('pointerdown',902,cx-38,cy);
+        fire('pointerdown',903,cx+38,cy);
+        fire('pointermove',902,cx-66,cy-5);
+        fire('pointermove',903,cx+66,cy+5);
+        fire('pointerup',902,cx-66,cy-5);
+        fire('pointerup',903,cx+66,cy+5);
+        return {before,afterPan,afterPinch:read(),gesture:Boolean(window.editor._touchGesture),
+          pen:Boolean(window.editor._pen)};
+      }''')
+      assert nav_result['afterPan']!=nav_result['before'],nav_result
+      assert nav_result['afterPinch']!=nav_result['afterPan'],nav_result
+      assert not nav_result['gesture'] and not nav_result['pen'],nav_result
+      page.locator('#manual-nav-toggle').click()
+      page.wait_for_function("window.editor._manualTraceNavMode===false && document.querySelector('#manual-nav-toggle').getAttribute('aria-pressed')==='false'")
+      page.evaluate("""() => document.querySelector('[data-vp="output"][data-action="fit"]')?.click()""")
+
       cursor0=page.evaluate('window.manualTraceUI.getCursor()')
       pad_box=page.locator('#manual-pad-surface').bounding_box()
       assert pad_box, 'Control Pad has no box'

@@ -339,17 +339,69 @@ export function bindViewportZoom(vp) {
 // by re-solving the translate that keeps the centroid's world point fixed (T' = (1-k)·u + k·T).
 export function bindViewportTouch(vp) {
   const pts = new Map();              // active touch pointers over the frame: id -> {x, y}
-  let g = null;                       // live gesture: {dist, c:{x,y}, scale, x, y, ox, oy}
-  const twoPts = () => { const a = [...pts.values()]; return a.length >= 2 ? [a[0], a[1]] : null; };
+  let g = null;                       // {kind:'pan'|'pinch', ...}
+  let manualGesture = false;          // explicit Manual Trace Pan & Zoom owns every enrolled touch
+  let manualChanged = false;
+
+  const values = () => [...pts.values()];
+  const twoPts = () => { const a = values(); return a.length >= 2 ? [a[0], a[1]] : null; };
   const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  const manualNav = () => !!editor._manualTraceTouchMode && !!editor._manualTraceNavMode;
+
+  const beginPinch = () => {
+    const two = twoPts(); if (!two) return;
+    const rect = vp.el.getBoundingClientRect();
+    g = {
+      kind: "pinch", dist: dist(two[0], two[1]), c: mid(two[0], two[1]),
+      scale: vp.scale, x: vp.x, y: vp.y,
+      ox: rect.left + rect.width / 2, oy: rect.top + rect.height / 2
+    };
+    editor._touchGesture = true;
+  };
+
+  const applyPinch = () => {
+    const two = twoPts(); if (!two || g?.kind !== "pinch") return;
+    const d = dist(two[0], two[1]);
+    const c = mid(two[0], two[1]);
+    const nextScale = Math.max(0.02, Math.min(40, g.dist > 0 ? g.scale * (d / g.dist) : g.scale));
+    const k = g.scale > 0 ? nextScale / g.scale : 1;
+    const ux = g.c.x - g.ox, uy = g.c.y - g.oy;
+    vp.scale = nextScale;
+    vp.x = (1 - k) * ux + k * g.x + (c.x - g.c.x);
+    vp.y = (1 - k) * uy + k * g.y + (c.y - g.c.y);
+    applyViewportState(vp);
+    if (manualGesture) manualChanged = true;
+  };
+
+  const finishManual = () => {
+    if (manualChanged && vp === viewports.output) editor.onViewportChanged();
+    manualChanged = false;
+    manualGesture = false;
+    g = null;
+    editor._touchGesture = false;
+  };
 
   vp.el.addEventListener("pointerdown", (event) => {
     if (event.pointerType !== "touch") return;
     if (!vp.el.querySelector(".viewport-content")) return;
-    // Manual Trace owns touch policy. Pen blocks ALL canvas touches; Edit
-    // Points lets actual node/Bezier handles receive one-finger correction,
-    // but never enrolls those touches into viewport pinch/pan tracking.
+
+    // Manual Trace stays indirect by default. The magnifier explicitly switches
+    // the canvas into navigation, where one finger pans and two fingers pinch.
+    if (manualNav()) {
+      event.preventDefault();
+      event.stopPropagation();
+      pts.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      manualGesture = true;
+      editor._touchGesture = true;
+      try { vp.el.setPointerCapture(event.pointerId); } catch {}
+      if (pts.size >= 2) beginPinch();
+      else g = { kind: "pan", last: { x: event.clientX, y: event.clientY } };
+      return;
+    }
+
+    // Draw/Edit mode keeps the Step-2 safety policy: Pen ignores canvas fingers;
+    // Edit Points only lets a real node/Bezier handle through to the editor.
     if (editor._manualTraceTouchMode) {
       const handle = event.target?.closest?.(".hv-handle,.hv-node-anchor,.hv-node-handle");
       if (editor._manualTraceTouchMode === "node" && handle) return;
@@ -357,52 +409,82 @@ export function bindViewportTouch(vp) {
       event.stopPropagation();
       return;
     }
+
     const firstId = pts.size ? [...pts.keys()][0] : null;
     pts.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (pts.size !== 2) return;
-    // Second finger → own the navigation gesture. Keep this pointer off the stage tools…
+
     event.preventDefault();
     event.stopPropagation();
     editor._touchGesture = true;
-    // …and cleanly end the first finger's op. A pointerup dispatched on document bubbles to
-    // window too, so both document- and window-level drag loops finalize and unbind.
+
+    // The first finger may already belong to a drawing/selection operation in the
+    // normal editor. End it before the second finger takes over navigation.
     if (firstId != null) {
       const fp = pts.get(firstId);
       try {
-        document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: firstId, clientX: fp.x, clientY: fp.y }));
-      } catch { /* older engines: the loop just rides through; harmless */ }
+        document.dispatchEvent(new PointerEvent("pointerup", {
+          bubbles: true, pointerId: firstId, clientX: fp.x, clientY: fp.y
+        }));
+      } catch { /* older engines: harmless; the live drag simply rides through */ }
     }
-    const [a, b] = twoPts();
-    const rect = vp.el.getBoundingClientRect();
-    g = { dist: dist(a, b), c: mid(a, b), scale: vp.scale, x: vp.x, y: vp.y, ox: rect.left + rect.width / 2, oy: rect.top + rect.height / 2 };
+    beginPinch();
   }, true);
 
   vp.el.addEventListener("pointermove", (event) => {
     if (event.pointerType !== "touch" || !pts.has(event.pointerId)) return;
+    const prev = pts.get(event.pointerId);
     pts.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (!g) return;
+
+    if (manualGesture) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (pts.size >= 2) {
+        if (g?.kind !== "pinch") beginPinch();
+        applyPinch();
+      } else {
+        if (g?.kind !== "pan") {
+          g = { kind: "pan", last: { x: event.clientX, y: event.clientY } };
+          return;
+        }
+        const last = g.last || prev;
+        const dx = event.clientX - last.x, dy = event.clientY - last.y;
+        if (dx || dy) {
+          vp.x += dx; vp.y += dy;
+          g.last = { x: event.clientX, y: event.clientY };
+          applyViewportState(vp);
+          manualChanged = true;
+        }
+      }
+      return;
+    }
+
+    if (!g || g.kind !== "pinch") return;
     event.preventDefault();
     event.stopPropagation();
-    const two = twoPts(); if (!two) return;
-    const d = dist(two[0], two[1]);
-    const c = mid(two[0], two[1]);
-    const nextScale = Math.max(0.02, Math.min(40, g.dist > 0 ? g.scale * (d / g.dist) : g.scale));
-    const k = g.scale > 0 ? nextScale / g.scale : 1;   // applied ratio (after clamp)
-    // Zoom about the initial centroid (u = centroid − frame-centre), then translate by how far
-    // the centroid itself has moved → pinch and two-finger pan compose in one gesture.
-    const ux = g.c.x - g.ox, uy = g.c.y - g.oy;
-    vp.scale = nextScale;
-    vp.x = (1 - k) * ux + k * g.x + (c.x - g.c.x);
-    vp.y = (1 - k) * uy + k * g.y + (c.y - g.c.y);
-    applyViewportState(vp);
+    applyPinch();
   }, true);
 
   const end = (event) => {
     if (!pts.has(event.pointerId)) return;
+    if (manualGesture) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
     pts.delete(event.pointerId);
+
+    if (manualGesture) {
+      if (pts.size >= 2) beginPinch();
+      else if (pts.size === 1) {
+        const p = values()[0];
+        g = { kind: "pan", last: { x: p.x, y: p.y } };
+      } else finishManual();
+      return;
+    }
+
     if (g && pts.size < 2) {
       g = null;
-      if (vp === viewports.output) editor.onViewportChanged();   // re-cull node handles to the new view
+      if (vp === viewports.output) editor.onViewportChanged();
     }
     if (pts.size === 0) editor._touchGesture = false;
   };
