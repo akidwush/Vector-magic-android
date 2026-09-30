@@ -91,7 +91,13 @@ with sync_playwright() as p:
           return real(blob);
         };
       }""")
-    page.locator('#studio-trace-button').click()
+    if width < 600:
+      page.locator('#mobile-add-fab').click()
+      page.wait_for_function("!document.querySelector('#mobile-add-sheet').hidden")
+      page.locator('[data-add-tab="media"]').click()
+      page.locator('#mobile-trace-open').click()
+    else:
+      page.locator('#studio-trace-button').click()
     page.locator('#studio-trace-file').set_input_files(FILE)
     page.wait_for_function("!document.querySelector('#studio-trace-run').disabled",timeout=10000)
     if width==412:
@@ -113,29 +119,60 @@ with sync_playwright() as p:
       shell=page.evaluate("""() => {
         const rect=s=>document.querySelector(s)?.getBoundingClientRect();
         const css=s=>getComputedStyle(document.querySelector(s));
-        const stage=rect('.stage-wrap'), manual=rect('#manual-trace-bar'), top=rect('#mobile-top'), status=rect('.status-bar');
+        const stage=rect('.stage-wrap'), top=rect('#mobile-top'), fab=rect('#mobile-add-fab');
         return {
           stageWidth:stage?.width||0, viewportWidth:innerWidth,
           manualDisplay:css('#manual-trace-bar').display,
-          manualWidth:manual?.width||0,
           legacyToolsDisplay:css('.toolstrip').display,
           actionDisplay:css('.actionbar').display,
-          topHeight:top?.height||0,statusHeight:status?.height||0,
-          traceTop:rect('#studio-trace-button')?.top??999,
-          manualButtons:document.querySelectorAll('#manual-trace-bar [data-manual-tool]').length,
-          fillVisible:(rect('#manual-fill')?.width||0)>0,
-          strokeVisible:(rect('#manual-stroke')?.width||0)>0
+          topHeight:top?.height||0,
+          addFab:fab?.width||0,
+          studioActions:css('.studio-actions').display
         };
       }""")
       assert shell['stageWidth'] >= width-2,shell
-      assert shell['manualDisplay']=='flex' and shell['manualWidth'] >= width-2,shell
-      assert shell['legacyToolsDisplay']=='none',shell
-      assert shell['actionDisplay']=='none',shell
-      assert shell['manualButtons']==3 and shell['fillVisible'] and shell['strokeVisible'],shell
-      assert shell['topHeight'] <= 56 and shell['statusHeight'] <= 36,shell
-      assert shell['traceTop'] < 16,shell
-      # Manual Trace Step 2: Pen canvas is touch-locked; Control Pad owns placement.
-      page.locator('#manual-trace-bar [data-manual-tool="pen"]').click()
+      assert shell['manualDisplay']=='none',shell
+      assert shell['legacyToolsDisplay']=='none' and shell['actionDisplay']=='none',shell
+      assert shell['topHeight'] <= 56 and shell['addFab']>=64,shell
+      assert shell['studioActions']=='none',shell
+
+      # Alight-style + shell: Shape / Media / Vector Drawing only.
+      page.locator('#mobile-add-fab').click()
+      page.wait_for_function("!document.querySelector('#mobile-add-sheet').hidden")
+      tabs=page.locator('#mobile-add-sheet [data-add-tab]').all_text_contents()
+      assert tabs==['○△□♡Shape','▧Media','✒Vector Drawing'],tabs
+
+      # Quick Shape becomes a real editable SVG object and summons exactly the
+      # requested five object categories — no Presets or Effects.
+      before_paths=page.evaluate("window.editor.stage.querySelectorAll('path').length")
+      page.locator('[data-add-shape="triangle"]').click()
+      page.wait_for_function("""!document.querySelector('#mobile-object-sheet').hidden
+        && window.editor.selection.size===1""")
+      after_paths=page.evaluate("window.editor.stage.querySelectorAll('path').length")
+      assert after_paths==before_paths+1,(before_paths,after_paths)
+      actions=page.locator('#mobile-object-grid [data-object-action]').all_text_contents()
+      assert actions==['◒Color & Fill','▣Border & Shadow','◇Blending & Opacity','↔Move & Transform','♢Edit Points'],actions
+      assert 'Preset' not in ''.join(actions) and 'Effect' not in ''.join(actions),actions
+      page.locator('#mobile-object-close').click()
+      page.evaluate("window.editor.undo()")
+
+      # Media reference is kept on the live canvas but explicitly stripped from SVG export.
+      page.locator('#mobile-add-fab').click()
+      page.locator('[data-add-tab="media"]').click()
+      page.locator('#mobile-reference-pick').click()
+      page.locator('#mobile-reference-file').set_input_files(FILE)
+      page.wait_for_function("""window.editor.stage.querySelector('image[data-vs-reference="1"]')""")
+      ref_export=page.evaluate("""() => ({live:!!window.editor.stage.querySelector('image[data-vs-reference="1"]'),
+        exported:/<image\\b/i.test(window.editor.serialize()),
+        marker:/data-vs-reference/i.test(window.editor.serialize())})""")
+      assert ref_export['live'] and not ref_export['exported'] and not ref_export['marker'],ref_export
+      page.evaluate("window.editor.undo()")
+
+      # Enter the existing vector engine from the third + tab; from here all
+      # Control Pad / Contour / Bezier QA continues unchanged.
+      page.locator('#mobile-add-fab').click()
+      page.locator('[data-add-tab="vector"]').click()
+      page.locator('#mobile-vector-draw').click()
       page.wait_for_function("""window.editor.tool==='pen'
         && window.editor._manualTraceTouchMode==='pen'
         && !document.querySelector('#manual-control-pad').hidden

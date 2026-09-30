@@ -315,6 +315,8 @@ const editor = {
     if (!this.stage) return "";
     const c = this.stage.cloneNode(true);
     c.querySelectorAll("g.hv-overlay, g.hv-guideslayer, g.hv-ablayer, g.hv-preview").forEach((g) => g.remove());
+    // Mobile Media references are tracing underlays, never SVG artwork.
+    c.querySelectorAll('[data-vs-reference="1"]').forEach((n) => n.remove());
     c.querySelectorAll(".hv-raster-hidden").forEach((n) => { n.classList.remove("hv-raster-hidden"); if (!n.getAttribute("class")) n.removeAttribute("class"); });
     c.querySelectorAll(".hv-iso-keep").forEach((n) => { n.classList.remove("hv-iso-keep", "hv-iso-active"); if (!n.getAttribute("class")) n.removeAttribute("class"); });   // isolation dim is editor-only (Epic I)
     // inline-svg is a query-selector hook (editor.js's own outputPreviewEl.querySelector("svg.inline-svg"))
@@ -1349,6 +1351,88 @@ const editor = {
     this.selection = new Set([id]); this.artboardSelected = false;
     this._renderSelection(); this._renderInspector(); this._renderLayers();
     setStatus(`Loaded ${label || "image"} into the canvas.`, 2600);
+    return true;
+  },
+
+  // Alight-style mobile + menu: add a useful vector immediately at artboard centre.
+  // Every primitive is a plain SVG path so Edit Points works identically on every shape.
+  insertQuickShape(kind) {
+    if (!this.stage) { setStatus("Create or open a canvas first.", 2200); return null; }
+    const ab = this.artboardEl(), vb = this.stage.viewBox.baseVal;
+    const ax = ab ? (parseFloat(ab.getAttribute("x")) || 0) : vb.x;
+    const ay = ab ? (parseFloat(ab.getAttribute("y")) || 0) : vb.y;
+    const aw = ab ? (parseFloat(ab.getAttribute("width")) || vb.width) : vb.width;
+    const ah = ab ? (parseFloat(ab.getAttribute("height")) || vb.height) : vb.height;
+    const size = Math.max(24, Math.min(aw, ah) * 0.24), r = size / 2;
+    const cx = ax + aw / 2, cy = ay + ah / 2;
+    const fmt = (v) => nfmt(v);
+    const poly = (count, radius = r, rot = -Math.PI / 2) =>
+      Array.from({ length: count }, (_, i) => ({
+        x: cx + Math.cos(rot + i * Math.PI * 2 / count) * radius,
+        y: cy + Math.sin(rot + i * Math.PI * 2 / count) * radius,
+      }));
+    const pathOf = (pts, close = true) => pts.length
+      ? "M" + pts.map((p) => `${fmt(p.x)} ${fmt(p.y)}`).join(" L") + (close ? " Z" : "")
+      : "";
+    let d = "", label = "Shape", lineOnly = false;
+    if (kind === "circle") {
+      const k = r * 0.5522847498;
+      d = `M${fmt(cx+r)} ${fmt(cy)} C${fmt(cx+r)} ${fmt(cy+k)} ${fmt(cx+k)} ${fmt(cy+r)} ${fmt(cx)} ${fmt(cy+r)} C${fmt(cx-k)} ${fmt(cy+r)} ${fmt(cx-r)} ${fmt(cy+k)} ${fmt(cx-r)} ${fmt(cy)} C${fmt(cx-r)} ${fmt(cy-k)} ${fmt(cx-k)} ${fmt(cy-r)} ${fmt(cx)} ${fmt(cy-r)} C${fmt(cx+k)} ${fmt(cy-r)} ${fmt(cx+r)} ${fmt(cy-k)} ${fmt(cx+r)} ${fmt(cy)} Z`;
+      label = "Circle";
+    } else if (kind === "rounded-rect") {
+      const x=cx-r,y=cy-r,rr=size*.18,x2=cx+r,y2=cy+r;
+      d=`M${fmt(x+rr)} ${fmt(y)} H${fmt(x2-rr)} Q${fmt(x2)} ${fmt(y)} ${fmt(x2)} ${fmt(y+rr)} V${fmt(y2-rr)} Q${fmt(x2)} ${fmt(y2)} ${fmt(x2-rr)} ${fmt(y2)} H${fmt(x+rr)} Q${fmt(x)} ${fmt(y2)} ${fmt(x)} ${fmt(y2-rr)} V${fmt(y+rr)} Q${fmt(x)} ${fmt(y)} ${fmt(x+rr)} ${fmt(y)} Z`;
+      label="Rounded Rectangle";
+    } else if (kind === "rect") { d=pathOf([{x:cx-r,y:cy-r},{x:cx+r,y:cy-r},{x:cx+r,y:cy+r},{x:cx-r,y:cy+r}]); label="Rectangle";
+    } else if (kind === "triangle") { d=pathOf(poly(3)); label="Triangle";
+    } else if (kind === "pentagon") { d=pathOf(poly(5)); label="Pentagon";
+    } else if (kind === "hexagon") { d=pathOf(poly(6)); label="Hexagon";
+    } else if (kind === "star") {
+      const pts=[];for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,rr=i%2===0?r:r*.44;pts.push({x:cx+Math.cos(a)*rr,y:cy+Math.sin(a)*rr});}
+      d=pathOf(pts);label="Star";
+    } else if (kind === "line") { d=pathOf([{x:cx-r,y:cy},{x:cx+r,y:cy}],false);label="Line";lineOnly=true;
+    } else return null;
+
+    this.push("Add " + label);
+    const node=document.createElementNS(SVG_NS,"path");
+    const id="n"+(++this.idSeq);
+    node.setAttribute("data-hv-id",id);
+    node.setAttribute("data-hv-name",label);
+    node.setAttribute("d",d);
+    let fill=this.style?.fill;
+    if(!fill||fill==="none")fill="#d9dde7";
+    let stroke=this.style?.stroke,sw=Number(this.style?.strokeWidth)||0;
+    if(lineOnly){fill="none";if(!stroke||stroke==="none")stroke="#d9dde7";sw=Math.max(sw,size*.035,2);}
+    node.setAttribute("fill",fill);
+    if(stroke&&stroke!=="none"&&sw>0){
+      node.setAttribute("stroke",stroke);node.setAttribute("stroke-width",nfmt(sw));
+      node.setAttribute("vector-effect","non-scaling-stroke");
+      node.setAttribute("stroke-linejoin","round");node.setAttribute("stroke-linecap","round");
+    }else node.setAttribute("stroke","none");
+    this._artHome().insertBefore(node,this._artBefore());
+    this.selection=new Set([id]);this.artboardSelected=false;
+    this._renderSelection();this._renderInspector();this._renderLayers();
+    setStatus("Added "+label+".",1200);
+    return node;
+  },
+
+  // A tracing reference behaves like a normal movable raster while editing, but is
+  // explicitly removed by serialize() so it can never leak into exported SVG.
+  placeReferenceImage(href,label,w,h) {
+    if(!this.placeImage(href,label,w,h))return false;
+    const node=this.selectedNodes()[0];if(!node)return false;
+    node.setAttribute("data-vs-reference","1");
+    node.setAttribute("data-hv-name","Reference: "+String(label||"image").replace(/\.[^.]+$/,""));
+    node.setAttribute("opacity","0.58");
+    const home=this._artHome();
+    const first=[...home.children].find((n)=>n!==node
+      && !SKIP_TAGS.has(n.tagName?.toLowerCase?.()||"")
+      && !n.classList?.contains("hv-artboard")
+      && !n.classList?.contains("hv-overlay")
+      && !n.classList?.contains("hv-guideslayer")
+      && !n.classList?.contains("hv-ablayer"));
+    if(first)home.insertBefore(node,first);
+    this._renderLayers();this._renderInspector();
     return true;
   },
 
