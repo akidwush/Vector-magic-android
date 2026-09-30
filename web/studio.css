@@ -1162,3 +1162,156 @@ body {background:#080a0d;color:#edf7f3}
     pointer-events:none;
   }
 }
+
+
+/* ==========================================================================
+   Alight-style SVG Canvas Shell
+   Mobile default = canvas + one Add FAB. Creation lives in a bottom sheet.
+   Vector selection summons only: Color/Fill, Border/Shadow, Blending/Opacity,
+   Move/Transform and Edit Points. Presets/Effects/animation controls do not exist.
+   ========================================================================== */
+.mobile-add-fab,.mobile-add-sheet,.mobile-sheet-scrim,.mobile-object-sheet { display:none; }
+
+@media (max-width:620px) {
+  .app.editor:not(.manual-vector-mode) .editor-grid {
+    grid-template-columns:minmax(0,1fr) !important;
+    grid-template-rows:54px minmax(0,1fr) !important;
+    background:#151824 !important;
+  }
+  .app.editor:not(.manual-vector-mode) .editor-grid > .mobilebar {
+    grid-column:1 !important;grid-row:1 !important;
+    min-height:54px !important;
+    padding:5px 8px !important;
+    background:#191c29 !important;
+    border-bottom:1px solid #242838 !important;
+  }
+  .app.editor:not(.manual-vector-mode) .editor-grid > .stage-wrap {
+    grid-column:1 !important;grid-row:2 !important;
+    min-height:0 !important;
+    background:#11141d !important;
+  }
+  .app.editor:not(.manual-vector-mode) .stage-wrap .stage-body,
+  .app.editor:not(.manual-vector-mode) .stage-wrap .preview-frame,
+  .app.editor:not(.manual-vector-mode) #output-preview {
+    height:100% !important;min-height:0 !important;
+    background:#11141d !important;background-image:none !important;
+  }
+
+  /* The old always-visible tool rail is replaced by the + workflow. It comes
+     back only inside the dedicated Vector Drawing workspace. */
+  .app.editor:not(.manual-vector-mode) #manual-trace-bar { display:none !important; }
+  .app.editor:not(.manual-vector-mode) .toolstrip,
+  .app.editor:not(.manual-vector-mode) .actionbar,
+  .app.editor:not(.manual-vector-mode) > .phone-ctxrow,
+  .app.editor:not(.manual-vector-mode) > .status-bar,
+  .app.editor:not(.manual-vector-mode) .mobile-fab,
+  .app.editor:not(.manual-vector-mode) .studio-actions {
+    display:none !important;
+  }
+
+  .mobile-add-fab {
+    display:grid;place-items:center;
+    position:fixed;right:22px;bottom:22px;z-index:210;
+    width:70px;height:70px;padding:0;
+    border:2px solid #16e4a6;border-radius:50%;
+    background:#0d7a5f;color:#1affbd;
+    box-shadow:0 9px 26px #0009, inset 0 0 0 1px #063d31;
+    font:300 48px/1 system-ui,sans-serif;
+    touch-action:manipulation;
+  }
+  .app.manual-vector-mode .mobile-add-fab,
+  .app.alight-add-open .mobile-add-fab,
+  .app.alight-object-open .mobile-add-fab {opacity:0;pointer-events:none}
+
+  .mobile-sheet-scrim:not([hidden]) {
+    display:block;position:fixed;inset:0;z-index:218;background:#0008;
+  }
+  .mobile-add-sheet:not([hidden]),
+  .mobile-object-sheet:not([hidden]) {
+    display:block;position:fixed;left:0;right:0;bottom:0;z-index:220;
+    box-sizing:border-box;
+    max-height:min(58dvh,470px);
+    overflow:auto;
+    border:1px solid #303547;border-bottom:0;
+    border-radius:22px 22px 0 0;
+    background:#1a1e2d;color:#f2f3f8;
+    box-shadow:0 -14px 40px #000b;
+    padding:7px 10px calc(14px + env(safe-area-inset-bottom));
+  }
+  .mobile-sheet-grab {
+    width:48px;height:4px;margin:2px auto 7px;border-radius:999px;background:#717789;
+  }
+  .mobile-add-tabs {
+    display:grid;grid-template-columns:repeat(3,1fr) 44px;gap:4px;
+    border-bottom:1px solid #2d3243;padding-bottom:7px;
+  }
+  .mobile-add-tabs button {
+    min-height:70px;border:0;border-radius:12px;background:transparent;color:#eef0f6;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
+    font:600 11px/1.1 system-ui,sans-serif;
+  }
+  .mobile-add-tabs button span {font-size:24px;color:#f2f3f7}
+  .mobile-add-tabs button.active {color:#18e5ad;background:#242a3d}
+  .mobile-add-tabs button.active span {color:#18e5ad}
+  #mobile-add-close {font-size:22px;color:#aeb4c5}
+  .mobile-add-body {padding:12px 3px 2px}
+
+  .mobile-shape-grid {
+    display:grid;grid-template-columns:repeat(4,1fr);gap:12px 10px;
+  }
+  .mobile-shape-grid button {
+    min-height:86px;border:0;border-radius:13px;background:#202536;color:#cfd2dc;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+  }
+  .mobile-shape-grid small {font:600 9px/1 system-ui,sans-serif;color:#959bad}
+  .shape-icon {display:block;width:43px;height:43px;position:relative;color:#cfd2dc;font-style:normal;font-size:43px;line-height:43px}
+  .shape-icon.circle {border-radius:50%;background:#cfd2dc}
+  .shape-icon.rounded {border-radius:9px;background:#cfd2dc}
+  .shape-icon.square {background:#cfd2dc}
+  .shape-icon.triangle {width:0;height:0;border-left:23px solid transparent;border-right:23px solid transparent;border-bottom:43px solid #cfd2dc}
+  .shape-icon.line::after {content:"";position:absolute;left:0;right:0;top:20px;height:6px;border-radius:5px;background:#cfd2dc;transform:rotate(-42deg)}
+  .shape-icon.star,.shape-icon.pentagon,.shape-icon.hexagon {font-size:46px;color:#cfd2dc}
+
+  .mobile-media-panel,.mobile-vector-panel {display:grid;gap:10px}
+  .mobile-media-panel button,.mobile-vector-panel button {
+    display:grid;grid-template-columns:52px minmax(0,1fr);grid-template-rows:auto auto;
+    column-gap:10px;text-align:left;align-items:center;
+    min-height:78px;padding:10px 13px;border:1px solid #343b50;border-radius:14px;
+    background:#22283a;color:#f0f2f7;
+  }
+  .mobile-media-panel button>span,.mobile-vector-panel button>span {
+    grid-row:1/3;font-size:31px;color:#22e2aa;text-align:center;
+  }
+  .mobile-media-panel b,.mobile-vector-panel b {font-size:14px}
+  .mobile-media-panel small,.mobile-vector-panel small {color:#9ba2b6;font-size:10px}
+
+  .mobile-object-sheet:not([hidden]) {z-index:219;max-height:min(48dvh,390px)}
+  .mobile-object-head {
+    display:flex;align-items:center;justify-content:space-between;min-height:38px;padding:0 5px 7px;
+  }
+  .mobile-object-head strong {font:650 14px system-ui,sans-serif;color:#e8eaf1}
+  .mobile-object-head button {width:40px;height:36px;border:0;border-radius:9px;background:#24293a;color:#c9cedb;font-size:18px}
+  .mobile-object-grid {
+    display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;
+  }
+  .mobile-object-grid button {
+    min-height:116px;padding:10px 6px;border:0;border-radius:13px;
+    background:#252a3c;color:#e0e2e9;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
+  }
+  .mobile-object-grid button span {font-size:38px;line-height:1;color:#f0f1f6}
+  .mobile-object-grid button b {font:500 12px/1.25 system-ui,sans-serif;text-align:center}
+  .mobile-object-detail>header {
+    display:flex;align-items:center;gap:8px;min-height:45px;border-bottom:1px solid #303648;margin-bottom:12px
+  }
+  .mobile-object-detail>header button {width:42px;height:38px;border:0;border-radius:9px;background:#252a3c;color:#fff;font-size:21px}
+  .mobile-object-detail label {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;align-items:center;margin:12px 3px;color:#daddE6;font:600 12px system-ui,sans-serif}
+  .mobile-object-detail label input[type="range"] {grid-column:1/3;width:100%;accent-color:#20dfa8}
+  .mobile-object-detail label select {grid-column:1/3;min-height:44px;border:1px solid #3b4258;border-radius:10px;background:#23283a;color:#fff;padding:0 10px}
+  .mobile-detail-actions {display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:13px 3px}
+  .mobile-detail-actions button {min-height:48px;border:1px solid #3c4358;border-radius:11px;background:#252a3c;color:#eef0f5}
+  .mobile-detail-actions button.active {border-color:#21dfaa;background:#12634f;color:#fff}
+
+  /* A tracing reference is visually subordinate and never appears in export. */
+  svg.inline-svg [data-vs-reference="1"] {opacity:.58}
+}
