@@ -993,3 +993,105 @@ body {background:#080a0d;color:#edf7f3}
     touch-action:none !important;
   }
 }
+
+
+/* ==========================================================================
+   Manual Trace Step 5 — Curve / Bezier tools around the Control Pad
+   ========================================================================== */
+.manual-bezier-tools { display:none; }
+
+@media (max-width:620px) {
+  .app.manual-node-mode .manual-bezier-tools:not([hidden]) {
+    grid-column:1 !important;
+    grid-row:3 !important;
+    align-self:stretch;
+    justify-self:start;
+    position:relative;
+    z-index:120;
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    grid-template-rows:repeat(3,minmax(38px,1fr)) auto;
+    gap:4px;
+    width:96px;
+    height:100%;
+    box-sizing:border-box;
+    padding:6px;
+    border-right:1px solid #343a50;
+    background:#1f2434f8;
+  }
+
+  .app.manual-node-mode .manual-control-pad:not([hidden]) {
+    padding-left:102px !important;
+  }
+
+  .manual-bezier-tools > button,
+  .manual-handle-side button {
+    min-width:0;
+    min-height:38px;
+    padding:3px 2px;
+    border:1px solid #42495e;
+    border-radius:8px;
+    background:#272c3d;
+    color:#d6dae5;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:1px;
+    font:700 9px/1 system-ui,sans-serif;
+    touch-action:manipulation;
+  }
+  .manual-bezier-tools > button:disabled {
+    opacity:.32;
+  }
+  .manual-bezier-tools > button.active,
+  .manual-handle-side button.active {
+    border-color:#24e0a6;
+    background:#0e6f52;
+    color:#fff;
+    box-shadow:0 0 0 1px #24e0a655 inset;
+  }
+  .manual-bezier-tools > button.state-on:not(.active) {
+    border-color:#4d9c80;
+    background:#273b35;
+    color:#8ff0ca;
+  }
+  .manual-bezier-glyph {
+    display:block;
+    font:600 19px/1 system-ui,sans-serif;
+  }
+  .manual-bezier-tools small {
+    font:700 8px/1 system-ui,sans-serif;
+    white-space:nowrap;
+  }
+
+  .manual-handle-side {
+    grid-column:1 / -1;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:4px;
+    padding-top:2px;
+  }
+  .manual-handle-side[hidden] { display:none !important; }
+  .manual-handle-side button {
+    min-height:28px;
+    flex-direction:row;
+    font-size:8px;
+  }
+
+  /* Add Point reuses the same precise crosshair as Pen. Mirror/Break never require
+     direct finger contact with a tiny Bezier handle; the centre pad owns movement. */
+  .app.manual-node-mode .manual-pad-surface {
+    cursor:default;
+  }
+  .app.manual-node-mode .manual-pad-surface.tracking {
+    box-shadow:inset 0 0 0 1px #20dfa366;
+  }
+
+  @media (max-width:380px) {
+    .app.manual-node-mode .manual-bezier-tools:not([hidden]) { width:90px; }
+    .app.manual-node-mode .manual-control-pad:not([hidden]) { padding-left:96px !important; }
+    .manual-bezier-glyph { font-size:17px; }
+    .manual-bezier-tools small { font-size:7px; }
+  }
+}
