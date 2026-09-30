@@ -49,6 +49,8 @@ jobs:
           grep -q 'Alight-style SVG Canvas Shell' dist/studio.css
           grep -q 'mobile-add-sheet' dist/index.html
           grep -q 'mobile-object-sheet' dist/index.html
+          grep -q 'mobile-object-delete' dist/index.html
+          grep -q 'mobile-shape-quick' dist/index.html
           test -s dist/studio.css
           test ! -e dist/netlify
       - name: Install Chromium QA

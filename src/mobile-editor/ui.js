@@ -30,7 +30,25 @@ export function installAlightMobileUI({editor,setStatus}){
 
   const objectSheet=document.querySelector("#mobile-object-sheet");
   const objectClose=document.querySelector("#mobile-object-close");
+  const objectDelete=document.querySelector("#mobile-object-delete");
   const objectTitle=document.querySelector("#mobile-object-title");
+  const shapeQuick=document.querySelector("#mobile-shape-quick");
+  const shapeKindLabel=document.querySelector("#mobile-shape-kind");
+  const shapeRoundRow=document.querySelector("#mobile-shape-round-row");
+  const shapeRound=document.querySelector("#mobile-shape-round");
+  const shapeRoundValue=document.querySelector("#mobile-shape-round-value");
+  const shapeSidesRow=document.querySelector("#mobile-shape-sides-row");
+  const shapeSides=document.querySelector("#mobile-shape-sides");
+  const shapeSidesValue=document.querySelector("#mobile-shape-sides-value");
+  const shapePointsRow=document.querySelector("#mobile-shape-points-row");
+  const shapePoints=document.querySelector("#mobile-shape-points");
+  const shapePointsValue=document.querySelector("#mobile-shape-points-value");
+  const shapeInsetRow=document.querySelector("#mobile-shape-inset-row");
+  const shapeInset=document.querySelector("#mobile-shape-inset");
+  const shapeInsetValue=document.querySelector("#mobile-shape-inset-value");
+  const shapeInnerRow=document.querySelector("#mobile-shape-inner-row");
+  const shapeInner=document.querySelector("#mobile-shape-inner");
+  const shapeInnerValue=document.querySelector("#mobile-shape-inner-value");
   const objectGrid=document.querySelector("#mobile-object-grid");
   const objectDetail=document.querySelector("#mobile-object-detail");
   const detailTitle=document.querySelector("#mobile-object-detail-title");
@@ -108,7 +126,32 @@ export function installAlightMobileUI({editor,setStatus}){
     if(scrim)scrim.hidden=false;
     app.classList.add("alight-add-open");
   }
+  function syncShapeControls(node){
+    const info=editor.quickShapeInfo?.(node);
+    if(!shapeQuick)return;
+    shapeQuick.hidden=!info;
+    if(!info)return;
+    const names={rect:"Rectangle",poly:"Polygon",star:"Star",ellipse:"Ellipse"};
+    if(shapeKindLabel)shapeKindLabel.textContent=names[info.kind]||"Shape";
+    const roundable=info.kind==="rect"||info.kind==="poly"||info.kind==="star";
+    if(shapeRoundRow)shapeRoundRow.hidden=!roundable;
+    if(shapeSidesRow)shapeSidesRow.hidden=info.kind!=="poly";
+    if(shapePointsRow)shapePointsRow.hidden=info.kind!=="star";
+    if(shapeInsetRow)shapeInsetRow.hidden=info.kind!=="star";
+    if(shapeInnerRow)shapeInnerRow.hidden=info.kind!=="ellipse";
+    if(roundable&&shapeRound){
+      const raw=info.kind==="rect"?info.radius:info.corner;
+      const pct=info.maxCorner>0?Math.round(raw/info.maxCorner*100):0;
+      shapeRound.value=String(Math.max(0,Math.min(100,pct)));
+      if(shapeRoundValue)shapeRoundValue.textContent=shapeRound.value+"%";
+    }
+    if(shapeSides){shapeSides.value=String(info.sides||5);if(shapeSidesValue)shapeSidesValue.textContent=shapeSides.value;}
+    if(shapePoints){shapePoints.value=String(info.points||5);if(shapePointsValue)shapePointsValue.textContent=shapePoints.value;}
+    if(shapeInset){shapeInset.value=String(Math.round((info.inset||.5)*100));if(shapeInsetValue)shapeInsetValue.textContent=shapeInset.value+"%";}
+    if(shapeInner){shapeInner.value=String(Math.round((info.inner||0)*100));if(shapeInnerValue)shapeInnerValue.textContent=shapeInner.value+"%";}
+  }
   function syncObjectValues(node){
+    syncShapeControls(node);
     const leaves=paintLeaves(node);
     const sample=leaves[0]||node;
     const sw=Math.max(0,parseFloat(sample.getAttribute("stroke-width"))||0);
@@ -217,7 +260,36 @@ export function installAlightMobileUI({editor,setStatus}){
     }
   }));
   objectClose?.addEventListener("click",closeObject);
+  objectDelete?.addEventListener("click",()=>{
+    const node=selectedVector();if(!node)return;
+    const name=editor.nodeName?.(node)||"SVG layer";
+    closeObject();
+    editor.deleteSelection?.();
+    setStatus?.(name+" deleted.",1400);
+  });
   detailBack?.addEventListener("click",detailToMenu);
+
+  const bindShapeRange=(el,label,apply,format=(v)=>String(v))=>{
+    if(!el)return;
+    el.addEventListener("pointerdown",()=>beginEdit(label));
+    el.addEventListener("input",()=>{
+      const node=selectedVector();if(!node)return;
+      beginEdit(label);
+      apply(node,Number(el.value)||0);
+      syncShapeControls(node);
+    });
+    el.addEventListener("change",commitEdit);
+    el.addEventListener("pointerup",commitEdit);
+  };
+  bindShapeRange(shapeRound,"Shape roundness",(node,pct)=>{
+    const info=editor.quickShapeInfo?.(node);if(!info)return;
+    const value=info.maxCorner*Math.max(0,Math.min(100,pct))/100;
+    editor.setQuickShapeParam?.(info.kind==="rect"?"r":"corner",value);
+  });
+  bindShapeRange(shapeSides,"Polygon sides",(_node,v)=>editor.setQuickShapeParam?.("sides",Math.max(3,Math.min(12,Math.round(v)))));
+  bindShapeRange(shapePoints,"Star points",(_node,v)=>editor.setQuickShapeParam?.("points",Math.max(3,Math.min(12,Math.round(v)))));
+  bindShapeRange(shapeInset,"Star inner radius",(_node,v)=>editor.setQuickShapeParam?.("inset",Math.max(.05,Math.min(.9,v/100))));
+  bindShapeRange(shapeInner,"Ellipse hole",(_node,v)=>editor.setQuickShapeParam?.("inner",Math.max(0,Math.min(.9,v/100))));
 
   strokeRange?.addEventListener("pointerdown",()=>beginEdit("Border width"));
   strokeRange?.addEventListener("input",()=>{
