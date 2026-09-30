@@ -1,0 +1,1 @@
+Vector Studio: Vector Ink trace (cloud upload via Netlify Function) + editable SVG canvas based on Hector Vector, MIT licensed. Image trace results are sanitised and imported as geometry.

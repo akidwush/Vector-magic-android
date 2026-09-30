@@ -1,0 +1,130 @@
+"""Static browser QA: uses a mocked upstream response but REAL DOM editor/preprocessing/import.
+Requires: Python Playwright + installed Chromium; python tests/browser-e2e.py.
+"""
+import base64, json, os, pathlib, posixpath, re, traceback
+from playwright.sync_api import sync_playwright
+URL='http://127.0.0.1:8976/'
+FILE=str(pathlib.Path('tests/fixtures/alpha.png').resolve())
+SVG='''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 100" width="120" height="100"><defs><linearGradient id="grad1"><stop offset="0%" stop-color="#14aa77"/><stop offset="100%" stop-color="#f3da40"/></linearGradient></defs><g id="colored" transform="translate(2 0)"><path id="p1" d="M0 20 C10 0 80 0 100 20 L100 70 Z" style="fill:url(#grad1)"/><circle cx="30" cy="40" r="8" fill="#22abcc"/></g></svg>'''
+EMBEDDED = os.environ.get('VECTOR_EMBEDDED') == '1'
+def mount_embedded_app(page):
+    # This local sandbox denies every browser navigation. To verify the *actual*
+    # original ESM graph anyway, map its imports to in-memory Blob URLs, then
+    # load the real HTML/CSS and run the original module graph in Chromium.
+    # about:blank is opaque-origin in this sandbox; emulate normal website storage.
+    page.evaluate("""() => {const values = new Map();Object.defineProperty(window,'localStorage',{
+      configurable:true,value:{getItem:k=>values.has(k)?values.get(k):null,
+      setItem:(k,v)=>values.set(k,String(v)),removeItem:k=>values.delete(k),clear:()=>values.clear()}})}""")
+    root=pathlib.Path('.').resolve()
+    source={}
+    pattern=re.compile(r"""(?:(\bfrom\s*|\bimport\s*|\bexport\s*\*\s*from\s*)[\\\"'])([./][^\\\"']+)([\\\"'])""")
+    # Simpler explicit patterns avoid transforming comment strings/unrelated URLs.
+    for file in sorted((root/'src').rglob('*.js')):
+        rel=file.relative_to(root).as_posix()
+        text=file.read_text()
+        def convert(match):
+            pre,spec,post=match.groups()
+            target=posixpath.normpath(posixpath.join(posixpath.dirname(rel),spec))
+            assert (root/target).exists(), (rel,spec,target)
+            return pre+post+'@vs/'+target+post
+        source['@vs/'+rel]=pattern.sub(convert,text)
+    mapping=page.evaluate('''src => Object.fromEntries(Object.entries(src).map(([key, js]) =>
+      [key, URL.createObjectURL(new Blob([js],{type:'text/javascript'}))]))''',source)
+    html=(root/'web/app.html').read_text()
+    logo=base64.b64encode((root/'assets/hv_logo.svg').read_bytes()).decode()
+    html=html.replace('/assets/hv_logo.svg','data:image/svg+xml;base64,'+logo)
+    for css in ['style.css','studio.css']:
+        html=html.replace('<link rel="stylesheet" href="/'+css+'" />',
+                          '<style>'+ (root/'web'/css).read_text()+'</style>')
+    html=html.replace('<script type="module" src="/src/app.js"></script>',
+      '<script type="importmap">'+json.dumps({'imports':mapping})+'</script>'+ 
+      '<script type="module">import("@vs/src/app.js").catch(e=>{window.__moduleError=e.stack||String(e);console.error(e.stack||e);});</script>')
+    page.set_content(html,wait_until='domcontentloaded')
+
+with sync_playwright() as p:
+  browser=p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
+  for width in [360,390,412,1080]:
+    errors=[];requests=[]
+    page=browser.new_page(viewport={'width':width,'height':760},device_scale_factor=1,has_touch=width<600,is_mobile=width<600)
+    page.on('pageerror',lambda e:errors.append(str(e)))
+    def intercept(route):
+      r=route.request
+      if r.method=='GET':route.fulfill(status=200,content_type='application/json',body=json.dumps({'ok':True,'colorEnabled':True,'siteKey':None}));return
+      d=r.post_data_json;requests.append(d)
+      assert d['action']=='color-trace'
+      assert d['options']['colorPrecision']==6
+      assert d['options']['speckleSize']==14
+      raw=base64.b64decode(d['image'])
+      assert raw.startswith(b'\x89PNG\r\n\x1a\n'),raw[:12]
+      route.fulfill(status=200,content_type='application/json',body=json.dumps({'ok':True,'svg':SVG,'provider':'vector-ink'}))
+    page.route('**/api/trace',intercept)
+    if EMBEDDED:
+      mount_embedded_app(page)
+      # No URLs can navigate from this sandbox's about:blank, so stub only the
+      # TRACE HTTP boundary; all frontend code is actual original modules.
+      page.evaluate("""svg => {
+        window.__traceRequests=[];
+        window.fetch=async (url,opts={}) => {
+          if (String(url)==='/api/trace') {
+            if ((opts.method||'GET')==='GET')
+              return new Response(JSON.stringify({ok:true,colorEnabled:true,siteKey:null}),{status:200,headers:{'Content-Type':'application/json'}});
+            const body=JSON.parse(opts.body);window.__traceRequests.push(body);
+            if (body.action!=='color-trace' || body.options.colorPrecision!==6 || body.options.speckleSize!==14 || !body.image.startsWith('iVBOR'))
+              throw Error('Incorrect V1 frontend payload');
+            return new Response(JSON.stringify({ok:true,svg,provider:'vector-ink'}),{status:200,headers:{'Content-Type':'application/json'}});
+          }
+          throw Error('No external network in embedded QA: '+String(url));
+        }
+      }""",SVG)
+    else: page.goto(URL,wait_until='domcontentloaded',timeout=20000)
+    page.locator('main.app').wait_for(state='visible',timeout=15000)
+    page.wait_for_function('!!window.editor?.stage && !!window.vectorStudio',timeout=18000)
+    page.locator('#studio-trace-button').click()
+    page.locator('#studio-trace-file').set_input_files(FILE)
+    page.locator('#studio-trace-run').click()
+    page.locator('#studio-trace-dialog').wait_for(state='hidden',timeout=18000)
+    doc=page.evaluate('''() => ({count:document.querySelectorAll('svg.inline-svg path').length,
+      gradients:document.querySelectorAll('svg.inline-svg defs linearGradient').length,
+      fill:document.querySelector('svg.inline-svg path')?.getAttribute('style'),
+      name:document.querySelector('#output-label')?.textContent,appIsCloud:!!window.__HV_CLOUD__,
+      editorStage:!!window.editor.stage,svgImages:window.editor.stage.querySelectorAll('image').length,
+      overflow:document.documentElement.scrollWidth>innerWidth+2})''')
+    assert doc['count']>0 and doc['gradients']>0,doc
+    assert 'grad1' in doc['fill'],doc
+    assert doc['appIsCloud'] and doc['editorStage'] and doc['svgImages']==0,doc
+    assert not doc['overflow'],doc
+    actual_requests=page.evaluate('window.__traceRequests') if EMBEDDED else requests
+    assert len(actual_requests)==1,actual_requests
+    if width==412:
+      target='@vs/src/trace/sanitize.js' if EMBEDDED else '/src/trace/sanitize.js'
+      safe=page.evaluate("""async target => {
+        const {sanitizeVectorSvg}=await import(target);
+        return sanitizeVectorSvg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><script>window.pwned=1</script><path d="M0 0L9 9" onload="alert(1)" style="fill:url(https://evil.invalid/a)"/></svg>');
+      }""",target)
+      assert '<script' not in safe and 'onload' not in safe and 'evil.invalid' not in safe and '<path' in safe,safe
+      assert not page.evaluate('Boolean(window.pwned)')
+      print('PASS SVG sanitization: removed script, event handlers, remote paint URLs')
+
+    if width==390:
+      page.screenshot(path='/mnt/data/vector-studio-canvas-preview.png')
+      # Existing drawing must not be destroyed, defs must be re-minted for new import.
+      page.evaluate("window.editor.placeSvgMarkup('<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 120 100\"><rect x=\"3\" y=\"4\" width=\"11\" height=\"12\" fill=\"#ff3344\"/></svg>', 'user-shape')")
+      before=page.evaluate('window.editor.stage.querySelectorAll("rect:not(.hv-artboard)").length')
+      page.locator('#studio-trace-button').click();page.locator('#studio-trace-file').set_input_files(FILE)
+      page.locator('#studio-trace-run').click()
+      page.locator('#studio-trace-dialog').wait_for(state='hidden',timeout=18000)
+      after=page.evaluate(r'''() => ({beforeRect:window.editor.stage.querySelectorAll('rect:not(.hv-artboard)').length,
+        groups:window.editor.stage.querySelectorAll('g[data-hv-name^="Trace:"]').length,
+        grads:window.editor.stage.querySelectorAll('defs linearGradient').length,
+        validRef:[...window.editor.stage.querySelectorAll('g[data-hv-name^="Trace:"] path')].some(x=>/url\(#hvtrace/.test(x.getAttribute('style')||'')),
+        sel:[...window.editor.selection].length})''')
+      assert after['beforeRect']==before and after['groups']>0 and after['grads']>=2 and after['validRef'] and after['sel']>0,after
+      # Undo keeps original user content, loses the last trace batch.
+      page.evaluate('window.editor.undo()')
+      remaining=page.evaluate('window.editor.stage.querySelectorAll("g[data-hv-name^=\\"Trace:\\"]").length')
+      assert remaining==0,remaining
+      print('PASS existing canvas: preserved original objects + gradient defs + editable selection + undo')
+    print(f'PASS browser {width}px: {doc} POST requests={len(actual_requests)}')
+    assert not errors,errors
+    page.close()
+  browser.close()

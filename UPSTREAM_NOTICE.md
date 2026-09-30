@@ -1,0 +1,1 @@
+Vector Studio uses the browser SVG editor from Hector Vector (MIT), copyright © 2026 asuramaya. See LICENSE and docs/HECTOR_VECTOR_UPSTREAM_README.md. Vector Ink is an independent third-party provider; its endpoint is not licensed through the Hector Vector codebase. No Vector Ink server implementation is bundled.

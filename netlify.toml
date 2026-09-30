@@ -1,0 +1,9 @@
+[build]
+  command = "bash scripts/build-netlify.sh"
+  publish = "dist"
+  functions = "netlify/functions"
+[build.environment]
+  NODE_VERSION = "22"
+[functions]
+  node_bundler = "esbuild"
+# Netlify Function trace.mjs owns /api/trace; no SPA wildcard rewrite.

@@ -1,0 +1,3024 @@
+:root {
+  --bg: #fff;
+  --fg: #000;
+  --line: #000;
+  --muted: #666;
+  --checker-a: #fff;
+  --checker-b: #dcdcdc;
+
+  /* ---- inky monochrome design tokens (panels / inspector / colour) ----
+     Edgy + boxy: pure-black structure and active fills, SHARP corners. One
+     ink, one height. Active = black-on-white; hover punches to black. */
+  --ink: #000;             /* active fills + strong text — deep pure black */
+  --ink-2: #000;           /* ink hover */
+  --label: #555;           /* field labels / section titles */
+  --hair: #000;            /* component borders (pure black, boxy) */
+  --hair-2: #000;          /* dividers */
+  --surface: #f0f0f0;      /* subtle hover tint on fields */
+  --field-h: 26px;         /* one control height everywhere in a panel */
+  --r: 0;                  /* sharp corners — no rounding */
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  /* iOS Safari ignores the viewport meta's user-scalable=no (an accessibility guarantee since
+     iOS 10) but DOES respect touch-action — this is Apple's own documented workaround. The
+     editor already implements its own two-finger pinch-to-zoom for the canvas (viewport.js
+     bindViewportTouch), so native page pinch/double-tap zoom is pure liability: it desyncs
+     getScreenCTM() from real touch coordinates (see editor.js stageCTM()). pan-x pan-y keeps
+     normal scrolling (dock panels, the bottom sheet, lists) working — an ancestor with
+     touch-action:none would kill scrolling in EVERY descendant, so this cannot be `none`. */
+  touch-action: pan-x pan-y;
+  /* The app is a shell, not a document: there is nothing to scroll and nothing to bounce. Without
+     this, a drag anywhere that isn't the canvas (a toolbar, a panel edge, the gap between them) is
+     handed to the page — iOS rubber-bands the whole UI under your finger and collapses/expands
+     Safari's toolbar as it goes, so the entire layout heaves around while you're trying to hit a
+     40px button. It also stops a scroll that reaches the end of a list from CHAINING out to the
+     page. */
+  overscroll-behavior: none;
+}
+
+button, select, input, a { font: inherit; }
+/* iOS paints its own translucent grey-blue box over any tapped control. We already draw a pressed
+   state; the OS one just smears it. */
+button, a, label, summary, [role="button"] { -webkit-tap-highlight-color: transparent; }
+
+.app {
+  height: 100vh;
+  height: 100dvh;   /* iOS Safari: 100vh is the TALL viewport (ignores the toolbars) so the bottom
+                       bar hides under Safari's UI. 100dvh tracks the live viewport — bars stay in reach. */
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 10px;
+  padding: 10px;
+}
+
+.topbar, .control-bar, .panel, .library, .status-bar {
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.topbar, .status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  flex-wrap: wrap;
+}
+
+.topbar > * { min-width: 0; }
+
+.label {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+
+.topbar h1 {
+  margin: 2px 0 0;
+  font-size: 28px;
+  line-height: 1;
+}
+
+
+.drop-button, .control-bar button, .ghost-button, .ghost-link, select {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  padding: 10px 12px;
+  text-decoration: none;
+}
+
+button:not(:disabled),
+a.ghost-link,
+select {
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.drop-button.drag {
+  background: #000;
+  color: #fff;
+}
+
+.library {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.control-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  padding: 10px;
+  align-items: center;
+}
+
+.control-bar > select,
+.control-bar > button,
+.control-bar > .slider-wrap {
+  min-width: 0;
+}
+
+.slider-wrap {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid var(--line);
+  padding: 0 10px;
+  height: 42px;
+  min-width: 0;
+}
+
+.main-grid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) minmax(0, 2fr) minmax(0, 2fr);
+  gap: 10px;
+}
+
+.panel {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+/* Preview panels are a flex column: head (top chin) and foot (bottom chin)
+   stay fixed-height, the frame in between grows to fill. */
+.panel.preview-panel,
+.stage-wrap.preview-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ============================ Editor reframe ============================ */
+/* ---- The highlight, and the five jobs it was secretly doing ------------------------------------
+ *
+ * --accent was ONE variable used 88 times, and it meant all of this at once: you are hovering this ·
+ * this is switched on · this is selected · you can drop here · and — the biggest group by far, and
+ * the one nobody had noticed — the editor's own furniture ON the canvas: anchors, handles, the
+ * marquee, the transform box, pen points.
+ *
+ * That overload is not just untidy, it is a BLOCKER. The next thing this UI needs to say is "these
+ * three buttons just became possible" (a boolean lights up the moment two shapes overlap), and there
+ * was no colour left to say it in: paint a tile in --accent and it is indistinguishable from a tile
+ * you are merely hovering, and from a toggle that is already on. You cannot add a sixth meaning to a
+ * colour that already carries five.
+ *
+ * So each job gets a name. They all still default to --accent, so nothing changes appearance today —
+ * this is a semantics split, not a repaint. What it buys: a theme can retint any one role (dark
+ * canvases need different handle colours than light ones), the user can pick their own highlight,
+ * and --hl-suggest is a colour nothing else uses — src/ui/pulse.js spends it on exactly one thing:
+ * a button that just became possible.
+ *
+ * --hl-on merges "toggled on" with "selected" and "current" on purpose. They are one idea — THIS is
+ * the chosen one — and three tokens nobody can tell apart is worse than one that is honest.
+ */
+:root {
+  --accent: #1b73e8;              /* the highlight colour itself — the one thing a user picks */
+  --hl-hover:   var(--accent);    /* you are pointing at this */
+  --hl-on:      var(--accent);    /* this is switched on / selected / current */
+  --hl-drop:    var(--accent);    /* you can drop here */
+  --hl-edit:    var(--accent);    /* the editor's furniture on the canvas: anchors, handles, marquee */
+  --hl-suggest: #d1651b;          /* NEW: this JUST became possible. Must never equal the accent, or
+                                     "you can do this now" reads as "you are hovering this". */
+  --on-ink: #fff;                 /* text knocked OUT of an ink or highlight fill. 39 rules hardcoded
+                                     this as #fff, which is fine right up until --ink IS #fff — then
+                                     every active button becomes white-on-white and simply vanishes. */
+
+  /* ---- The ghost tokens -------------------------------------------------------------------------
+   * These seven were REFERENCED and never DEFINED: `var(--panel)`, `var(--paper)`,
+   * `var(--hover)`. Someone meant them to be themeable, wrote the var() and never wrote the
+   * declaration — so every one of them has been silently rendering its hardcoded light-theme
+   * fallback, forever, and no theme could ever move them. That is why the suggestion block stayed a
+   * white card on a black app: `background: var(--paper)` was never anything but #fafafa.
+   *
+   * A var() fallback is a safety net that hides exactly this. The fallbacks are stripped at the call
+   * sites now: an undefined token should fail LOUDLY (the property drops) rather than quietly paint
+   * the wrong theme. --field-bg was the tell — its fallback was #2a2a2e, a DARK value, sitting in an
+   * app that only had a light theme. Nobody could have seen it. */
+  --paper: #fafafa;               /* a surface lifted slightly off the page (cards, callouts) */
+  --panel: var(--bg);             /* panel/menu ground */
+  --hover: rgba(0, 0, 0, 0.05);   /* the faint tint under a pointer */
+  --field-bg: var(--bg);          /* an input's own paper */
+  --border: var(--line);
+  --fg-muted: var(--muted);
+  --danger: #c33;
+}
+
+/* ---- Themes -----------------------------------------------------------------------------------
+ *
+ * There was no theme system at all: :root was hardcoded white paper and black ink, and that was the
+ * only way hector-vector had ever looked. The whole UI already derives from a dozen tokens, though,
+ * so a theme is just a redefinition of them — the work was never the painting, it was the fact that
+ * the tokens didn't exist yet (see the accent split above).
+ *
+ * INK is the load-bearing one and the easy thing to get wrong. In the light theme --ink is pure
+ * black: it is the colour of structure (borders) AND of "this is on" (active fills, with white text
+ * knocked out of it). Invert the page and a black fill is now invisible against a black background,
+ * so ink has to become the LIGHTEST thing, not the darkest — it is not "the dark colour", it is
+ * "the opposite of the paper". Get that backwards and every active button vanishes.
+ */
+:root[data-theme="dark"] {
+  --bg: #17181a;
+  --fg: #eceef1;
+  --line: #34373c;
+  --muted: #9aa0a8;
+  --checker-a: #1f2124;
+  --checker-b: #2a2d31;
+  --ink: #eceef1;          /* the opposite of the paper, NOT "the dark one" */
+  --ink-2: #fff;
+  --label: #a8aeb6;
+  --hair: #3a3e44;
+  --hair-2: #2e3135;
+  --surface: #212327;
+  --accent: #4c9aff;       /* the light-theme blue is muddy on a dark ground; lift it */
+  --hl-suggest: #f0883e;
+  --on-ink: #17181a;       /* ink is nearly white here, so its knocked-out text must be the paper */
+  --paper: #1e2023;        /* lifted OFF a dark page means lighter, not darker */
+  --hover: rgba(255, 255, 255, 0.07);
+  --danger: #ff6b6b;       /* #c33 on a dark ground is a bruise, not a warning */
+}
+/* Inverted: not "dark mode", a STATEMENT. Pure black paper, pure white ink, the same hard edges and
+   square corners the light theme has. The monochrome design finally cuts both ways. */
+:root[data-theme="invert"] {
+  --bg: #000;
+  --fg: #fff;
+  --line: #fff;
+  --muted: #8a8a8a;
+  --checker-a: #000;
+  --checker-b: #232323;
+  --ink: #fff;
+  --ink-2: #fff;
+  --label: #aaa;
+  --hair: #fff;
+  --hair-2: #fff;
+  --surface: #1a1a1a;
+  --accent: #fff;          /* in a pure two-tone world the highlight IS the ink... */
+  --hl-suggest: #ffd400;   /* ...so the ONE colour in the whole app is the one that says "you can do
+                              this now". Nothing else competes with it, which is exactly the point. */
+  --on-ink: #000;          /* ink is white here; text knocked out of it must be the paper, or every
+                              active button is white-on-white and disappears — which it did. */
+
+  /* --hl-edit does NOT follow the accent here, and this is the one place a theme must break its own
+     rule. The other highlights sit on the app's own chrome, whose colour we control. This one sits
+     on the CANVAS, whose colour belongs to the user's document — and the default artboard is white.
+     Let --hl-edit inherit #fff and the selection box, the anchors and the transform handles all draw
+     white on white and vanish. The editor's furniture has to read against the artwork, not against
+     the app, so it stays a colour that survives on both black and white ground. */
+  --hl-edit: #4c9aff;
+  --paper: #0e0e0e;        /* the only grey a two-tone world allows: just enough to read as a card */
+  --hover: #1c1c1c;
+  --danger: #ff5555;
+}
+
+.app.editor { grid-template-rows: auto 1fr auto; }
+
+/* File icon (left) · panel shelf (right). Undo/redo live by the
+   viewport BG button; help/collapse live in the ready bar. */
+.editor-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.doc-actions-left { justify-self: start; }
+.brand-logo { height: 22px; width: auto; display: block; flex: 0 0 auto; }
+/* document name, centred in the header (moved out of the stage so the canvas gets the
+   full height). flex:1 between the File icon and the header's right-side group → centred + truncates. */
+.doc-title { flex: 1 1 auto; min-width: 0; text-align: center; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-sel { color: var(--accent); font-weight: 600; }
+.brand { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.brand-name { font-weight: 600; letter-spacing: 0.02em; }
+.brand-sub { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-actions { flex-wrap: wrap; justify-content: flex-end; }
+.bar-sep { width: 1px; align-self: stretch; background: var(--line); opacity: 0.4; margin: 0 2px; }
+
+.editor-grid {
+  min-height: 0;
+  display: grid;
+  /* toolstrip · stage · actionbar · rightdock (history + layers) */
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  /* no gap between the toolstrip / stage / action bar: they butt together so their
+     borders form one continuous picture frame around the canvas. The dock is set
+     apart with its own margin (below). */
+  gap: 0;
+}
+/* The grid template (which dock columns exist) is driven by JS in the Dockable-panels
+   module — leftdock·toolstrip·stage·actionbar·rightdock, with each side dock's `auto`
+   track added only when that dock is shown. Empty/folded docks are set display:none. */
+.leftdock { display: none; }   /* default until JS shows it / a panel docks here */
+
+/* Library / Processor / Info / Jobs are ordinary dock panels — same tier as Properties /
+   Colour (collapsible, floatable, closeable to the shelf). Manage — a separate summon/
+   dismiss surface that used to borrow these out of the dock into its own grid — was killed
+   entirely per an explicit operator ruling: browsing and editing aren't different modes. */
+/* The click-a-Library-tile "bring attention" pulse (library.js's bringAttention) — Info and
+   Processor are what a click updates, but neither is what you physically clicked, so without
+   this the update is real but silent. Restart-safe via bringAttention's remove+reflow+re-add. */
+@keyframes hv-attn-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--hl-drop) 60%, transparent); }
+  100% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--hl-drop) 0%, transparent); }
+}
+.rail-section.hv-attn { animation: hv-attn-pulse 0.7s ease-out; }
+.info-empty { padding: 14px 12px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+/* Phone-only quick bar (undo/redo + zoom/fit). Off a phone it holds nothing — app.js only moves
+   the real buttons into it below 620px — so it must not claim a grid row here. */
+.mobilebar { display: none; }
+
+.toolstrip {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  flex: 0 0 auto;
+  justify-content: center;   /* swatches moved to the canvas → tools centre in the bar */
+}
+/* THE shared button object — every toolbar (tools, arrange, actions, viewport)
+   inherits this one class so they all match. Primary tools opt into a larger box. */
+.tool-button {
+  position: relative;
+  width: 30px; height: 30px;
+  border: 1px solid var(--line);
+  background: var(--bg); color: var(--fg);
+  font-size: 14px; line-height: 1; cursor: pointer; white-space: nowrap;
+  display: grid; place-items: center;
+}
+.tool-button.active { background: #000; color: #fff; }
+/* one consistent hover / disabled / toggle-on treatment for every bar */
+.tool-button:hover:not(:disabled):not(.active):not(.on) { background: var(--hl-hover); color: var(--on-ink); border-color: var(--hl-hover); }
+.tool-button:hover:not(:disabled)[data-key]::after { color: rgba(255, 255, 255, 0.8); }
+.tool-button:disabled { opacity: 0.3; cursor: default; }
+.tool-button.on { background: var(--hl-on); color: var(--on-ink); border-color: var(--hl-on); }
+.tool-button.on[data-key]::after { color: rgba(255, 255, 255, 0.8); }
+/* A suggestion is a TRANSITION: src/ui/pulse.js adds this class to the real button (never a second
+   copy of it) the moment the button flips impossible -> possible, and removes it a couple seconds
+   later. One glow in --hl-suggest, then gone — a suggestion that lingers turns into a fixture nobody
+   reads twice. Duration must match pulse.js's PULSE_MS. */
+.tool-button.hl-pulse { animation: hl-pulse 2.2s ease-out; }
+@keyframes hl-pulse {
+  0%, 20% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--hl-suggest) 45%, transparent); border-color: var(--hl-suggest); }
+  100% { box-shadow: 0 0 0 0 transparent; border-color: var(--line); }
+}
+/* right-side object action bar — mirrors the left toolstrip (clipboard / boolean /
+   transform actions for the selection). Buttons are the same square objects as the
+   tools, and as action buttons they get a hover + disabled state. */
+.actionbar {
+  border: 1px solid var(--line); background: var(--bg);
+  display: flex; flex-direction: column; gap: 6px; padding: 6px; flex: 0 0 auto;
+  justify-content: center;
+}
+/* V and A are the two primary tools; the creation tools below read as subcontrols */
+.tool-button.tool-primary { width: 34px; height: 34px; font-size: 17px; }
+/* shortcut badge: a tiny letter in the bottom-right corner (tool buttons,
+   viewport controls, the fill/stroke swap — one consistent kind of object) */
+.tool-button[data-key]::after, .swatch-swap[data-key]::after,
+.icon-btn[data-key]::after, .view-btn[data-key]::after {
+  content: attr(data-key);
+  position: absolute; right: 1px; bottom: 0;
+  font-size: 8px; line-height: 1; font-weight: 600;
+  color: var(--muted); pointer-events: none; letter-spacing: 0;
+}
+.tool-button.active[data-key]::after { color: rgba(255, 255, 255, 0.75); }
+/* A touch device has no keyboard, so every one of these badges is a lie — "⌘X" on a phone is pure
+   noise cluttering a 44px target. One rule kills them everywhere (tools, viewport controls, action
+   tiles, the swap swatch, the File menu). The data-key attributes stay: the shortcuts still work for
+   anyone with a keyboard attached, and the picker still reads them. */
+@media (pointer: coarse) {
+  .tool-button[data-key]::after, .swatch-swap[data-key]::after,
+  .icon-btn[data-key]::after, .view-btn[data-key]::after,
+  .bar-btn[data-key]::after { content: none; }
+}
+/* viewport controls now use the shared .tool-button object (see above) */
+.vp-sep { width: 1px; align-self: stretch; margin: 2px 3px; background: var(--line); }
+.swatch-swap[data-key]::after { right: -6px; bottom: -1px; }
+/* header icon box (File menu) — same bordered-box object, square */
+.icon-btn {
+  position: relative; box-sizing: border-box; width: 32px; height: 30px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+  font: inherit; font-size: 16px; line-height: 1; cursor: pointer; display: grid; place-items: center;
+}
+/* Open/hover state is INK, not accent. Blue was survivable on a 32px header icon; with the brand mark
+   living in this button on a phone it became a big blue tile, and blue means "selected object"
+   everywhere else in this app. Every other active control here is black-on-white (.tool-button.active,
+   .view-btn.active) — one language. */
+.icon-btn:hover, .menu.open .icon-btn { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+/* the logo is a black mark: invert it when the button goes black, or it vanishes into its own tile */
+.menu.open .icon-btn.has-logo .brand-logo { filter: invert(1); }
+/* text variant for header dropdown triggers (Layout ▾) */
+.icon-btn.hdr-text { width: auto; padding: 0 10px; font-size: 13px; }
+.icon-btn.hdr-text.active { background: var(--hl-on); color: var(--on-ink); border-color: var(--hl-on); }
+.menu.open .icon-btn[data-key]::after, .icon-btn:hover[data-key]::after { color: rgba(255, 255, 255, 0.8); }
+/* Cloud build: the desktop-only panels (Library/Processor/Jobs) don't exist; show the
+   download-the-desktop-app CTA instead. `.cloud` is set on <html> by env.js. */
+.get-desktop { display: none; }
+.cloud .get-desktop { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; margin-left: 4px;
+  font-size: 12px; font-weight: 600; color: var(--fg); background: var(--panel); border: 1px solid var(--hair);
+  border-radius: var(--r); text-decoration: none; white-space: nowrap; }
+.cloud .get-desktop:hover { border-color: var(--ink); background: var(--bg); }
+.view-btn {
+  position: relative; box-sizing: border-box; min-width: 34px; height: 30px;
+  padding: 0 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+  font: inherit; font-size: 16px; line-height: 1; cursor: pointer; display: grid; place-items: center;
+}
+.view-btn + .view-btn { border-left: 0; }
+.view-btn:hover:not(.active) { background: var(--hover); }
+.view-btn.active { background: #000; color: #fff; border-color: #000; }
+.view-btn.active[data-key]::after { color: rgba(255, 255, 255, 0.7); }
+.view-count {
+  position: absolute; top: -5px; right: -5px; min-width: 14px; height: 14px; padding: 0 3px;
+  box-sizing: border-box; background: var(--accent); color: var(--on-ink); border-radius: 7px;
+  font-size: 9px; font-weight: 700; line-height: 14px; text-align: center;
+}
+.view-count:empty { display: none; }
+.tool-sep { height: 1px; background: var(--line); margin: 2px 4px; align-self: stretch; }
+/* Fill (primary) / stroke (secondary) swatches — float in the canvas's inner
+   bottom-right corner (over the stage body, above the rulers). */
+.tool-spacer { flex: 1 1 auto; }
+.tool-swatches {
+  position: absolute; right: 12px; bottom: 12px; z-index: 8;
+  width: 40px; height: 48px; padding: 0;
+  pointer-events: auto;
+}
+.swatch { position: absolute; width: 22px; height: 22px; padding: 0; cursor: pointer; border: 1px solid #777; box-shadow: 0 0 0 1px #fff; }
+.swatch-fill { left: 0; top: 0; z-index: 2; }
+.swatch-stroke { right: 0; top: 13px; z-index: 1; }
+.swatch.none { background: var(--bg); }
+.swatch.none::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top right, transparent 44%, #e0245e 45%, #e0245e 55%, transparent 56%); }
+.swatch-swap { position: absolute; left: 0; bottom: 3px; width: 16px; height: 14px; border: 0; background: none; padding: 0; cursor: pointer; font-size: 11px; line-height: 1; color: var(--muted); }
+.swatch-swap:hover { color: #000; }
+
+/* right dock: Inspector (properties) above, Layers below — resizable + collapsible */
+.rightdock {
+  position: relative;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  margin-left: 10px;   /* set apart from the picture-frame (which has no gaps) */
+  width: 270px;
+  min-height: 0;
+  overflow: hidden;   /* backstop: a mis-sized section can never spill the dock off-screen */
+  display: flex;
+  flex-direction: column;
+}
+.dock-resizer {
+  position: absolute; left: -5px; top: 0; bottom: 0; width: 9px;
+  cursor: ew-resize; z-index: 6; touch-action: none;
+}
+.dock-resizer:hover { background: var(--hl-hover); opacity: 0.3; }
+.menu-count { color: var(--muted); font-size: 11px; margin-left: 2px; }
+.rail-section { display: flex; flex-direction: column; min-height: 0; }
+
+/* Left dock — mirror of the right dock (margin + resizer on the opposite edge). */
+.leftdock {
+  position: relative; border: 1px solid var(--line); background: var(--bg);
+  margin-right: 10px; width: 270px; min-height: 0; overflow: hidden; flex-direction: column;
+}
+.dock-resizer-l { left: auto; right: -5px; }
+/* The Properties panel reuses .context-panel for inspector-style selectors, but as a
+   docked rail-section it must fill the column (not the 248px fixed float width). */
+.rail-section.context-panel { width: auto; border: 0; box-shadow: none; }
+/* The × is never shown: docked panels aren't "closed", and a floating panel re-docks by
+   dragging its header back (no close button to accidentally lose a panel). It stays in the
+   DOM purely as the header receiver's tail anchor. */
+.leftdock .panel-x, .rightdock .panel-x, .dock-window .panel-x { display: none; }
+.dock-window .rail-section.collapsed .panel-actions { display: flex; }   /* keep the header actions reachable on a collapsed float */
+/* Every panel header action area is a customize-layout drop RECEIVER. All header buttons
+   are one consistent size (one rule, every header) — no placeholder/blank-slot box; an
+   empty header just shows the outlined drop area while customising. Capped at 3 tiles. */
+/* panel-header receiver buttons read as the same soft hairline objects as the
+   inspector icon buttons (not hard black boxes that hover blue) */
+.section-head .panel-actions .tool-button { width: 26px; height: 26px; font-size: 12px; border: 1px solid var(--hair); border-radius: var(--r); background: var(--bg); color: var(--ink); }
+.section-head .panel-actions .tool-button:hover:not(:disabled):not(.active):not(.on) { background: var(--surface); color: var(--ink); border-color: var(--hair-2); }
+.section-head .panel-actions .tool-button.active, .section-head .panel-actions .tool-button.on { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+/* Same drop-zone language as every other customize-layout bar (toolstrip/actionbar/etc, below)
+   — it used to be a neutral outline: var(--ink) on var(--surface), which barely reads against a
+   white header and left panel headers looking exempt from customizing when they're not (their
+   action icons — undo/redo, the panel-x — are registered bars too, see BARS in layout.js).
+   Scoped to .panel-actions specifically, not the whole .section-head row: the rest of the header
+   has its own always-on drag (reordering the PANEL itself within the dock, unrelated to and
+   unaffected by Customize layout), so painting the whole row here would imply a connection to
+   customize mode that isn't there.
+   padding+negative-margin, not just outline: the buttons inside pack edge to edge with zero gap,
+   so a background tint / -1px outline-offset on .panel-actions itself renders fully behind their
+   own opaque backgrounds — present in the DOM, invisible on screen. The padding buys the tint an
+   actual ring to show in; the matching negative margin keeps the header's height/layout exactly
+   as it was outside customize mode. */
+.app.editor.customizing .section-head .panel-actions { min-width: 26px; min-height: 26px; padding: 3px; margin: -3px; outline: 1px dashed var(--hl-drop); outline-offset: -1px; background: color-mix(in srgb, var(--hl-drop) 10%, var(--bg)); border-radius: calc(var(--r) + 2px); }
+/* Shelf: closed/unused panels parked as squares in the top-right header. Click to reopen,
+   right-click for a tiny menu. Empty → hidden so it takes no space. */
+.panel-shelf { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.panel-shelf:empty { display: none; }
+.shelf-sq { width: 26px; height: 26px; font-size: 13px; line-height: 1; border: 1px solid var(--hair); border-radius: var(--r); background: var(--bg); color: var(--ink); cursor: pointer; display: grid; place-items: center; padding: 0; }
+.shelf-sq:hover { background: var(--surface); border-color: var(--hair-2); }
+.shelf-sq.dimmed { opacity: 0.5; }   /* a shelved contextual panel that isn't currently relevant */
+/* Auto-parked (contextual/idle) square: dashed + muted, to read as "available, nothing to
+   act on yet" — distinct from a solid square (a panel you closed by hand). */
+.shelf-sq.auto { border-style: dashed; color: var(--muted); }
+.shelf-sq.auto:hover { color: var(--ink); }
+/* Colour panel: the picker editor embedded in a panel body (no backdrop/window chrome). */
+.color .fp-body { padding: 0; }
+.cp-window.cp-embedded { position: static; width: auto; max-width: none; border: 0; box-shadow: none; padding: 8px; gap: 7px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+/* When the panel is too short the picker SCROLLS — its fixed rows (field, alpha bar,
+   swatches) keep their size instead of collapsing the transparency bar to nothing. */
+.cp-window.cp-embedded > * { flex-shrink: 0; }
+.cp-window.cp-embedded .cp-head { display: none; }   /* the panel header already titles it */
+/* drag any panel's header to detach/float or to re-dock + reorder (no detach button) */
+.leftdock .section-head, .rightdock .section-head, .dock-window .section-head { cursor: grab; }
+/* A floating, draggable panel window (History / Layers / Properties popped out). */
+.dock-window {
+  position: fixed; z-index: 80; min-width: 190px; min-height: 120px;
+  display: flex; flex-direction: column; background: var(--bg);
+  border: 1px solid var(--line); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+}
+/* All-sides resize handles (replaces the single bottom-right `resize:both`). Thin
+   inside-edge strips + slightly bigger corners; sit above content so the very edge
+   always grabs. */
+.dock-rs { position: absolute; z-index: 6; }
+.dock-rs-n { top: 0; left: 0; right: 0; height: 5px; cursor: ns-resize; }
+.dock-rs-s { bottom: 0; left: 0; right: 0; height: 5px; cursor: ns-resize; }
+.dock-rs-e { right: 0; top: 0; bottom: 0; width: 5px; cursor: ew-resize; }
+.dock-rs-w { left: 0; top: 0; bottom: 0; width: 5px; cursor: ew-resize; }
+.dock-rs-ne, .dock-rs-nw, .dock-rs-se, .dock-rs-sw { width: 10px; height: 10px; z-index: 7; }
+.dock-rs-ne { top: 0; right: 0; cursor: nesw-resize; }
+.dock-rs-nw { top: 0; left: 0; cursor: nwse-resize; }
+.dock-rs-se { bottom: 0; right: 0; cursor: nwse-resize; }
+.dock-rs-sw { bottom: 0; left: 0; cursor: nesw-resize; }
+.dock-window > .rail-section { flex: 1 1 auto; min-height: 0; }
+.dock-window > .rail-section > .section-body,
+.dock-window > .rail-section .layers-list { flex: 1 1 auto; }
+.dock-window.dragging { opacity: 0.92; cursor: grabbing; }
+/* A collapsed floating panel hugs its header — drop the window's min-height + resize
+   grabber so there's no empty chin below the folded header. */
+.dock-window:has(> .rail-section.collapsed) { min-height: 0; resize: none; }
+.dock-window.float-panel { z-index: 1000; }   /* Properties window above the docks */
+/* Properties body fills its section (window or dock), not the 248px float max-height. */
+.dock-window .fp-body, .leftdock .properties .fp-body, .rightdock .properties .fp-body,
+.leftdock .color .fp-body, .rightdock .color .fp-body { max-height: none; flex: 1 1 auto; }
+/* Drop indicator shown over a dock zone while dragging a window onto it. */
+.dock-droplines { position: fixed; z-index: 1100; pointer-events: none;
+  border: 2px solid var(--hl-drop); background: color-mix(in srgb, var(--hl-drop) 12%, transparent); border-radius: 2px; }
+/* insertion line between / below panels (vs. the full-zone box for an empty dock) */
+.dock-droplines.line { border: 0; background: var(--hl-drop); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6); }
+.dock-droplines.hidden { display: none; }
+
+/* ---- Locking-bezel groups: snapped floating panels tiled in one container ----
+   The group behaves like a floating mini-dock — drag a member header to move it all,
+   the 8-way handles scale it, and the bezel between members resizes / detaches. */
+.dock-group {
+  position: fixed; z-index: 80; min-width: 220px; min-height: 140px;
+  display: flex; flex-direction: row; background: var(--bg);
+  border: 1px solid var(--line); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.22); overflow: hidden;
+}
+.dock-group.col { flex-direction: column; }
+.dock-group.dragging { opacity: 0.92; cursor: grabbing; }
+.dock-group > .rail-section { min-width: 0; min-height: 0; overflow: hidden; }
+/* An EXPANDED grouped member can't shrink below a usable size — a near-zero fraction
+   otherwise leaves a thin empty "ghost" strip you can't grab back (collapsed members
+   still hug their header via flex:0 0 auto, so this only floors live ones). */
+.dock-group:not(.col) > .rail-section:not(.collapsed) { min-width: 130px; }
+.dock-group.col > .rail-section:not(.collapsed) { min-height: 96px; }
+.dock-group > .rail-section > .section-body, .dock-group > .rail-section .layers-list,
+.dock-group .fp-body { flex: 1 1 auto; min-height: 0; max-height: none; }
+.dock-group > .rail-section .panel-x { display: none; }   /* × redocks → splits; use the bezel */
+/* the bezel = draggable seam between two members (double-click to detach) */
+.dock-bezel { flex: 0 0 6px; align-self: stretch; background: var(--line); cursor: col-resize; position: relative; z-index: 5; }
+.dock-group.col > .dock-bezel { cursor: row-resize; }
+.dock-bezel:hover { background: var(--hl-hover); }
+/* snap preview line shown while a dragged panel is about to lock to an edge */
+.dock-snapline { position: fixed; z-index: 1100; pointer-events: none; background: var(--hl-drop); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6); }
+.dock-snapline.hidden { display: none; }
+
+/* the side-panel fold toggle reads as "active" when panels are hidden */
+.bar-btn.on { background: var(--hl-on); color: var(--on-ink); border-color: var(--hl-on); }
+
+/* Nothing over the canvas is text you're meant to select. On iOS a long-press there was starting a
+   text selection and popping the native Copy/Look-Up callout over the artwork — the SVG itself had
+   user-select:none, but the wrapper (and <text> elements inside it) did not, and -webkit-touch-callout
+   is a separate switch nothing had ever turned off. The canvas is a drawing surface, so say so. */
+.stage-wrap {
+  min-height: 0; position: relative;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+/* ...except the text tool's live editor, which IS real text you type into. */
+.stage-wrap [contenteditable="true"], .stage-wrap input, .stage-wrap textarea {
+  user-select: text; -webkit-user-select: text; -webkit-touch-callout: default;
+}
+.stage-head { gap: 10px; }
+/* arrange/structure toolbar across the top of the canvas (reorder/group/cleanup …) */
+/* top arrange bar — the top run of the picture frame: same fill as the side bars,
+   bordered top (outer edge) and bottom (inner edge against the canvas). Desktop windows can
+   narrow this bar below its content width same as a phone can — it must scroll sideways, not
+   wrap to a second row (which used to eat canvas height AND look like broken layout, not an
+   intentional bar). `safe center`: centres when it fits, same as before, but degrades to
+   start-alignment instead of clipping once it overflows — plain `center` on an overflowing
+   flex row makes the far side unreachable by scrolling (same trap the mobile rail already
+   worked around; see the phone-ctxrow comment further down). */
+.stage-toolbar {
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: safe center; gap: 6px;
+  flex-wrap: nowrap; padding: 5px 8px; background: var(--bg);
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+}
+.stage-toolbar::-webkit-scrollbar { display: none; }
+.stage-toolbar > * { flex: 0 0 auto; }
+.tool-vsep { width: 1px; align-self: stretch; margin: 3px 4px; background: var(--line); }
+/* body holds the rulers overlay + the preview frame (so rulers don't cover the toolbar) */
+.stage-body { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+/* Illustrator-style measurement rulers (canvas-drawn, synced to zoom/pan) overlaid on
+   the top + left edges of the stage. pointer-events:none so the canvas stays clickable. */
+.rulers { position: absolute; inset: 0; pointer-events: none; z-index: 6; }
+.rulers[hidden] { display: none; }
+.ruler { position: absolute; background: var(--bg); pointer-events: auto; }
+.ruler-h { cursor: ns-resize; }
+.ruler-v { cursor: ew-resize; }
+/* explicit width/height: an absolutely-positioned <canvas> (replaced element) uses its
+   intrinsic size with left+right:auto, so it won't stretch — size it directly. */
+.ruler-h { top: 0; left: 18px; width: calc(100% - 18px); height: 18px; border-bottom: 1px solid var(--line); }
+.ruler-v { top: 18px; left: 0; width: 18px; height: calc(100% - 18px); border-right: 1px solid var(--line); }
+.ruler-corner { position: absolute; top: 0; left: 0; width: 18px; height: 18px; background: var(--bg); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); z-index: 1; }
+
+.inspector {
+  background: var(--bg);
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  flex: 1 1 50%;
+}
+/* Docked panels share the column height equally (panels are reorderable now, so there's
+   no single fixed History/Layers split + drag handle). Collapsed panels shrink to head. */
+.leftdock .rail-section, .rightdock .rail-section { flex: 1 1 0; min-height: 96px; height: auto; }
+.leftdock .rail-section.collapsed, .rightdock .rail-section.collapsed { flex: 0 0 auto; min-height: 0; height: auto; }
+.dock-vresizer { display: none; }   /* old fixed handle — superseded by per-pair .dock-vsep */
+/* Draggable handle between two stacked docked panels (resize up/down). */
+.dock-vsep { flex: 0 0 6px; cursor: row-resize; touch-action: none; background: var(--bg); border-top: 1px solid var(--hair); }
+.dock-vsep:hover { background: var(--ink); opacity: 0.18; }
+.history-list { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.history-row { text-align: left; padding: 5px 12px; font: inherit; font-size: 12px; line-height: 1.4; background: none; border: 0; border-left: 2px solid transparent; color: #1d1d1f; cursor: pointer; }
+.history-row:hover { background: #f2f2f2; }
+.history-row.current { background: #000; color: #fff; }
+.history-row.future { color: #9b9b9b; }
+.inspector-body { min-height: 0; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 14px; }
+
+/* ============================================================================
+   Inspector design system — one inky, hairline-drawn component vocabulary used
+   by every panel (Object / Artboard / Colour). Active states are ink-on-white;
+   structure is hairlines; one --field-h height; one --r radius. No hard black
+   boxes, no blue. See also the shared field/seg/btn rules below.
+   ============================================================================ */
+/* Raster panel "Process" section: the pipeline stages docked into Properties for a
+   selected <image>. .hv-raster-hidden hides the source while a live trace previews
+   on top of it (the canvas reads as the vector). */
+.inline-svg .hv-raster-hidden { display: none; }
+.raster-tools { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
+.rt-heading {
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600;
+  color: var(--label); padding-bottom: 5px; border-bottom: 1px solid var(--ink);
+}
+.rt-stage { display: flex; flex-direction: column; gap: 6px; }
+.rt-stage-head { font-size: 11px; font-weight: 600; color: var(--ink); opacity: 0.85; }
+.rt-stage-body { display: flex; flex-direction: column; gap: 6px; }
+.rt-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.rt-actions .primary-button, .rt-actions .ghost-button { font-size: 12px; padding: 6px 10px; flex: 1 1 auto; }
+.rt-stage + .rt-stage { padding-top: 10px; border-top: 1px dashed var(--hair); }
+
+.insp-group { display: flex; flex-direction: column; gap: 6px; }
+/* Sections are siblings inside one wrap div, so they need an explicit gap — without
+   this they collide (only the title's margin separated them). Tight rows WITHIN a
+   section, a clear break BETWEEN sections. */
+.insp-group + .insp-group { margin-top: 18px; }
+.insp-title {
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600;
+  color: var(--label); padding-bottom: 5px; border-bottom: 1px solid var(--ink); margin: 0 0 2px;
+}
+/* Collapsible group headers: click the title to fold. The caret is a ::before pseudo (NOT a
+   child node) so .insp-title.textContent stays equal to the group name. */
+.insp-title.is-collapsible { position: relative; padding-left: 13px; cursor: pointer; user-select: none; }
+.insp-title.is-collapsible:hover { color: var(--ink); }
+.insp-title.is-collapsible::before { content: "\25BE"; position: absolute; left: 0; top: 0; font-size: 8px; letter-spacing: 0; color: var(--label); }
+.insp-group.collapsed > .insp-title.is-collapsible::before { content: "\25B8"; }
+.insp-group.collapsed > :not(.insp-title) { display: none; }
+.insp-group.collapsed > .insp-title { margin-bottom: 0; border-bottom-color: var(--hair); }
+.insp-row { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 8px; align-items: center; min-height: var(--field-h); }
+.insp-row > span { font-size: 11.5px; color: var(--label); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* scrubbable number label — drag horizontally to change the value */
+.insp-row > span.scrub { cursor: ew-resize; user-select: none; -webkit-user-select: none; touch-action: none; }
+.insp-row > span.scrub:hover { color: var(--ink); text-decoration: underline dotted; text-underline-offset: 2px; }
+
+/* Paired number fields (X|Y, W|H, Rotate|Corner) — two label+input pairs share one row
+   so short numeric values stop wasting half the panel width. */
+.insp-row.insp-pair { grid-template-columns: 1fr 1fr; gap: 6px; }
+.insp-field { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px; align-items: center; min-width: 0; }
+.insp-field > span { font-size: 11.5px; color: var(--label); text-align: left; white-space: nowrap; }
+.insp-field > span.scrub { cursor: ew-resize; user-select: none; -webkit-user-select: none; touch-action: none; }
+.insp-field > span.scrub:hover { color: var(--ink); text-decoration: underline dotted; text-underline-offset: 2px; }
+.insp-field.is-disabled { opacity: 0.38; }
+.insp-field.is-disabled input { cursor: not-allowed; }
+
+/* Small inline note under inspector rows (e.g. area-text overflow warning). */
+.insp-note { font-size: 11px; line-height: 1.35; color: var(--label); }
+.insp-note-warn { color: #d2691e; }
+
+/* No native number spinners — the drag-to-scrub label replaces them. */
+.insp-row input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+.insp-row input[type="number"]::-webkit-outer-spin-button,
+.insp-row input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* text / number / select field — the canonical input */
+.insp-row input[type="number"], .insp-row input[type="text"], .insp-row select {
+  width: 100%; height: var(--field-h); min-width: 0; border: 1px solid var(--hair); border-radius: var(--r);
+  background: var(--bg); color: var(--ink); padding: 0 8px; font-size: 12px; font-variant-numeric: tabular-nums; line-height: var(--field-h);
+}
+.insp-row input[type="number"]:hover, .insp-row input[type="text"]:hover, .insp-row select:hover { background: var(--surface); }
+.insp-row input[type="number"]:focus, .insp-row input[type="text"]:focus, .insp-row select:focus { outline: none; border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); background: var(--bg); }
+.insp-row select { cursor: pointer; padding-right: 4px; }
+.insp-row input[type="color"] { width: 100%; height: var(--field-h); padding: 0; border: 1px solid var(--hair); border-radius: var(--r); background: var(--bg); cursor: pointer; }
+.insp-empty { color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+
+/* compact preset buttons (artboard size presets) */
+.insp-preset-btns { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.insp-preset-btns .ghost-button {
+  padding: 0 9px; height: var(--field-h); font-size: 11px; color: var(--ink); border: 1px solid var(--hair);
+  border-radius: var(--r); background: var(--bg); font-variant-numeric: tabular-nums;
+}
+.insp-preset-btns .ghost-button:hover { background: var(--ink); color: var(--on-ink); }
+
+/* row of square icon buttons (align / arrange / flip / orient) */
+.insp-btns { display: flex; gap: 5px; min-width: 0; align-items: center; }
+.insp-iconbtn {
+  flex: 0 0 auto; width: var(--field-h); height: var(--field-h); display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--hair); background: var(--bg); color: var(--ink); cursor: pointer; border-radius: var(--r); padding: 0;
+}
+.insp-iconbtn:hover:not(:disabled) { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+.insp-iconbtn:disabled { opacity: 0.3; cursor: default; }
+.insp-iconbtn.on { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+.insp-iconbtn svg { display: block; pointer-events: none; }
+.insp-ratio { margin-left: auto; font-size: 11px; color: var(--label); font-variant-numeric: tabular-nums; }
+
+/* bottom chin of the Properties panel — pinned align-to-artboard bar (never scrolls
+   away). 6 equal-width ink buttons spanning the panel. */
+.insp-foot { flex: 0 0 auto; border-top: 1px solid var(--ink); padding: 7px 10px; }
+.insp-foot:empty { display: none; }
+.insp-alignbar { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; }
+.insp-alignbar .insp-iconbtn { width: 100%; }
+/* distribute row nests inside the align grid, spanning its full width on its own line */
+.insp-distributebar { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; margin-top: 5px; }
+
+/* inspector swatch (opens the colour picker) */
+.insp-swatch {
+  width: 100%; height: var(--field-h); padding: 0; border: 1px solid var(--hair); border-radius: var(--r); cursor: pointer;
+  background: #000; box-shadow: inset 0 0 0 1px #fff;
+}
+.insp-swatch.none { background: var(--bg); background-image: linear-gradient(to top right, transparent 45%, var(--ink) 46%, var(--ink) 54%, transparent 55%); }
+.insp-swatch.mixed { background-image: repeating-linear-gradient(45deg, rgba(127,127,127,0.5) 0 5px, rgba(127,127,127,0.15) 5px 10px); box-shadow: inset 0 0 0 1px #fff; }
+/* Fills group (Epic K.1): one row per fill-stack layer — a small square swatch (not the
+   usual full-width .insp-swatch), an inline opacity %, then reorder/remove icon buttons. */
+.insp-fill-row { display: flex; align-items: center; gap: 6px; }
+.insp-fill-row .insp-swatch { width: var(--field-h); flex: 0 0 auto; }
+.insp-fill-opacity { width: 48px; flex: 0 0 auto; height: var(--field-h); border: 1px solid var(--hair); border-radius: var(--r); background: var(--bg); color: var(--fg); padding: 0 6px; font: inherit; font-variant-numeric: tabular-nums; text-align: right; }
+.insp-fill-opacity:focus { outline: none; border-color: var(--ink); }
+.insp-slider-val.mixed { font-style: italic; opacity: 0.7; }
+/* Gradient mesh (Epic D.4): the RxC colour-point grid — small square swatches laid out in
+   an actual grid (not the usual full-width .insp-swatch row) so the 2D structure reads. */
+.insp-mesh-grid { display: grid; gap: 4px; }
+.insp-mesh-swatch { width: 100%; aspect-ratio: 1; height: auto; }
+
+/* segmented control (cap / join / dash presets) — one connected hairline pill */
+.insp-seg { display: flex; height: var(--field-h); border: 1px solid var(--hair); border-radius: var(--r); overflow: hidden; }
+.insp-seg-btn {
+  flex: 1 1 0; border: 0; border-left: 1px solid var(--hair); background: var(--bg); color: var(--ink);
+  padding: 0; font-size: 12px; line-height: 1; cursor: pointer; min-width: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.insp-seg-btn:first-child { border-left: 0; }
+.insp-seg-btn:hover:not(.active) { background: var(--surface); }
+.insp-seg-btn svg { display: block; pointer-events: none; }
+.insp-seg-btn.active { background: var(--ink); color: var(--on-ink); }
+
+/* dash editor: presets row + dash/gap length sliders */
+.insp-stroke-style { display: flex; flex-direction: column; gap: 7px; }
+.insp-dash-sliders { display: flex; flex-direction: column; gap: 5px; }
+.insp-dash-srow { display: grid; grid-template-columns: 30px minmax(0, 1fr) 22px; align-items: center; gap: 8px; }
+.insp-dash-srow > span { font-size: 11px; color: var(--label); }
+.insp-dash-srow > .insp-dash-val { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+.insp-dash-srow.insp-disabled .insp-dash-val { color: var(--label); }
+
+/* a control that doesn't apply yet (cap/join with no stroke, miter on a non-miter join) */
+.insp-row.insp-disabled, .insp-disabled { opacity: 0.4; pointer-events: none; }
+.insp-slider { display: flex; align-items: center; gap: 9px; min-height: var(--field-h); }
+.insp-slider-val { font-size: 11.5px; color: var(--label); min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* monochrome range slider — a black SQUARE thumb (white-bordered so it reads on
+   the black track). No native blue, no round corners. */
+.insp-slider input[type="range"], .insp-dash-srow input[type="range"] { flex: 1 1 0; width: 100%; min-width: 0; -webkit-appearance: none; appearance: none; background: transparent; height: 16px; cursor: pointer; }
+.insp-slider input[type="range"]::-webkit-slider-runnable-track, .insp-dash-srow input[type="range"]::-webkit-slider-runnable-track { height: 2px; background: var(--ink); }
+.insp-slider input[type="range"]::-moz-range-track, .insp-dash-srow input[type="range"]::-moz-range-track { height: 2px; background: var(--ink); }
+.insp-slider input[type="range"]::-webkit-slider-thumb, .insp-dash-srow input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: -5px; border-radius: 0; background: var(--ink); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--ink); }
+.insp-slider input[type="range"]::-moz-range-thumb, .insp-dash-srow input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 0; background: var(--ink); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--ink); }
+.insp-disabled input[type="range"]::-webkit-slider-track { background: #bbb; }
+.insp-disabled input[type="range"]::-webkit-slider-thumb { background: #bbb; box-shadow: 0 0 0 1px #bbb; }
+
+/* checkbox — small ink-filled SQUARE box (no native blue) */
+.insp-row input[type="checkbox"] { -webkit-appearance: none; appearance: none; width: 15px; height: 15px; border: 1px solid var(--ink); border-radius: var(--r); background: var(--bg); cursor: pointer; position: relative; margin: 0; }
+.insp-row input[type="checkbox"]:hover { background: var(--surface); }
+.insp-row input[type="checkbox"]:checked { background: var(--ink); border-color: var(--ink); }
+.insp-row input[type="checkbox"]:checked::after { content: ""; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+
+/* active fill/stroke swatch in the toolstrip (Illustrator's X focus) */
+.swatch.active { outline: 2px solid var(--hl-on); outline-offset: 1px; z-index: 3; }
+
+/* ---------- unified colour picker ---------- */
+.cp-backdrop {
+  position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center;
+  background: transparent;   /* movable floating panel — don't dim the canvas */
+}
+.cp-window {
+  width: 300px; max-width: calc(100vw - 24px); box-sizing: border-box;
+  background: var(--bg); color: var(--fg); border: 1px solid var(--hair-2); border-radius: var(--r);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22); padding: 10px; display: flex; flex-direction: column; gap: 8px;
+  font-size: 12px; overflow: hidden;
+}
+.cp-head { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.cp-body { display: flex; gap: 8px; min-width: 0; }
+/* field flexes to fill the row so field + hue + preview never overflow the window */
+.cp-field { position: relative; flex: 1 1 auto; width: auto; min-width: 0; height: 128px; cursor: crosshair; border: 1px solid var(--hair-2); border-radius: var(--r); overflow: hidden; }
+.cp-field-sat { position: absolute; inset: 0; background: linear-gradient(to right, #fff, rgba(255,255,255,0)); }
+.cp-field-val { position: absolute; inset: 0; background: linear-gradient(to top, #000, rgba(0,0,0,0)); }
+.cp-field-thumb {
+  position: absolute; width: 12px; height: 12px; border: 2px solid #fff; border-radius: 50%;
+  transform: translate(-50%, -50%); box-shadow: 0 0 0 1px #000; pointer-events: none;
+}
+.cp-hue { position: relative; width: 14px; height: 128px; cursor: ns-resize; border: 1px solid var(--hair-2); border-radius: var(--r); flex: 0 0 auto;
+  background: linear-gradient(to bottom, #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%); }
+.cp-hue-thumb { position: absolute; left: -2px; right: -2px; height: 4px; background: #fff; border: 1px solid #000; transform: translateY(-50%); pointer-events: none; }
+/* side column: fill/stroke targets (duo) or a solo live preview (single) */
+.cp-side { flex: 0 0 44px; display: flex; flex-direction: column; gap: 5px; }
+.cp-side .cp-target { flex: 1 1 0; position: relative; padding: 0; border: 1px solid var(--hair-2); border-radius: var(--r); cursor: default; }
+.cp-side.duo .cp-target { cursor: pointer; }
+.cp-side.duo .cp-target.active { border-color: var(--ink); box-shadow: 0 0 0 2px var(--ink); z-index: 1; }
+.cp-target > .cp-target-lab {
+  position: absolute; top: 2px; left: 2px; font-size: 9px; line-height: 1; padding: 1px 3px;
+  background: rgba(255, 255, 255, 0.82); color: #000; pointer-events: none; letter-spacing: 0.02em;
+}
+.cp-alpha { position: relative; height: 13px; cursor: ew-resize; border: 1px solid var(--hair-2); border-radius: var(--r); overflow: hidden; }
+.cp-alpha-track { position: absolute; inset: 0; }
+.cp-alpha-thumb { position: absolute; top: -2px; bottom: -2px; width: 4px; background: #fff; border: 1px solid #000; transform: translateX(-50%); pointer-events: none; }
+/* numeric fields: two tidy columns (RGB | HSB) with right-aligned values, hex + alpha
+   span the full width. Each row is a fixed label cell + input so everything lines up. */
+/* colour-model tabs (RGB / HSL / HSB) — one connected hairline pill, ink active */
+.cp-models { display: flex; flex-direction: column; gap: 7px; }
+.cp-tabs { display: flex; height: var(--field-h); border: 1px solid var(--hair); border-radius: var(--r); overflow: hidden; }
+.cp-tab { flex: 1 1 0; border: 0; border-left: 1px solid var(--hair); background: var(--bg); color: var(--label); font: inherit; font-size: 11px; letter-spacing: 0.05em; cursor: pointer; }
+.cp-tab:first-child { border-left: 0; }
+.cp-tab:hover:not(.active) { background: var(--surface); color: var(--ink); }
+.cp-tab.active { background: var(--ink); color: var(--on-ink); }
+.cp-fields { display: flex; flex-direction: column; gap: 5px; }
+.cp-triple { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px 8px; }
+.cp-inp { display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: center; gap: 5px; font-size: 11px; color: var(--label); min-width: 0; cursor: ew-resize; user-select: none; -webkit-user-select: none; touch-action: none; }
+.cp-inp input { cursor: text; min-width: 0; height: var(--field-h); border: 1px solid var(--hair); border-radius: var(--r); background: var(--bg); color: var(--ink); padding: 0 7px; font: inherit; font-variant-numeric: tabular-nums; text-align: right; }
+.cp-inp input:hover { border-color: var(--hair-2); }
+.cp-inp input:focus { outline: none; border-color: var(--ink); }
+.cp-hex input { text-align: left; letter-spacing: 0.06em; }
+/* recent-colours strip (auto-tracked, above the saved palette) */
+.cp-recent { display: flex; flex-direction: column; gap: 4px; }
+.cp-strip-lab { font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--label); font-weight: 600; }
+.cp-recent-row { display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px; }
+/* gradient editor (Epic G): paint-type tabs + a draggable stop strip */
+.cp-gradient { display: flex; flex-direction: column; gap: 6px; }
+.cp-paint-types { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.cp-ptype { padding: 4px 0; font-size: 10.5px; border: 1px solid var(--hair-2); border-radius: var(--r); background: var(--bg); color: var(--label); cursor: pointer; }
+.cp-ptype:hover { border-color: var(--ink); color: var(--ink); }
+.cp-ptype.active { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+.cp-grad-strip { position: relative; height: 18px; border: 1px solid var(--hair-2); border-radius: var(--r); cursor: copy; }
+.cp-grad-stop { position: absolute; top: 50%; width: 12px; height: 12px; transform: translate(-50%, -50%); border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px var(--ink); cursor: grab; }
+.cp-grad-stop.active { box-shadow: 0 0 0 2px var(--ink); width: 14px; height: 14px; }
+.cp-swatches { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; }
+/* a folder: spans the full swatch grid as one item, with its own nested row of swatches */
+.cp-swgroup { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; margin-top: 2px; padding-top: 4px; border-top: 1px solid var(--hair-2); }
+.cp-swgroup-head { cursor: default; }
+.cp-swgroup-row { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; }
+.cp-sw { width: 100%; aspect-ratio: 1 / 1; padding: 0; border: 1px solid var(--hair-2); border-radius: var(--r); cursor: pointer; }
+.cp-sw:hover { box-shadow: 0 0 0 1px var(--ink); }
+.cp-sw-add { background: var(--bg); color: var(--label); font-size: 14px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; border-color: var(--hair); }
+.cp-sw-add:hover { color: var(--ink); border-color: var(--ink); box-shadow: none; }
+/* Global colours (Epic C.1) — a shared, document-scoped row above the personal swatches:
+   same tile object (.cp-sw), plus an "on" ring when the active fill/stroke is currently
+   linked to it (so linked-vs-just-the-same-hex reads as visibly different at a glance). */
+.cp-globals-lab { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.cp-globals-row { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; margin-bottom: 8px; }
+.cp-global.on { box-shadow: 0 0 0 2px var(--hl-on); }
+/* eyedropper sits in the swatch row as a clearly-bordered icon (first item) */
+.cp-eyedrop { background: var(--bg); color: var(--ink); display: inline-flex; align-items: center; justify-content: center; margin-right: 2px; border-color: var(--hair); }
+.cp-eyedrop:hover { background: var(--ink); color: var(--on-ink); border-color: var(--ink); box-shadow: none; }
+.cp-actions { display: flex; align-items: center; gap: 6px; }
+.cp-spacer { flex: 1 1 auto; }
+
+/* selection overlay — lives in the stage svg but is stripped from saved output */
+.hv-sel-box { fill: none; stroke: var(--hl-edit); stroke-width: 1.5; vector-effect: non-scaling-stroke; pointer-events: none; }
+.inline-svg.hv-pickable { pointer-events: auto; }
+
+/* the workspace name duplicated the brand — the source path lives in the rail */
+.brand-sub, .brand-path { display: none; }
+
+/* layers panel */
+.rail-section.layers { flex: 1 1 auto; min-height: 120px; }
+/* In a side dock the Library hugs its content (so it doesn't starve Layers); scope this
+   to the docks ONLY. When floated/grouped the section must FILL its window so the list
+   scrolls inside it (see .dock-window > .rail-section) — otherwise a detached Library
+   grew to full content height, lost its scroll, and ran out of bounds. */
+.leftdock .rail-section.library, .rightdock .rail-section.library { flex: 0 0 auto; }
+.layers-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.layer-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px; border-bottom: 1px solid var(--line);
+  cursor: pointer; font-size: 13px; background: var(--bg);
+}
+/* Reorder handle. touch-action:none is what lets a FINGER drag the row at all: without it the
+   browser claims the gesture as a scroll of the layer list. Only the grip claims it, so dragging
+   anywhere else on a row still scrolls the panel normally. */
+.layer-grip {
+  flex: 0 0 auto; width: 16px; text-align: center;
+  color: var(--muted); font-size: 12px; line-height: 1; cursor: grab;
+  touch-action: none; user-select: none;
+}
+.layer-grip:active { cursor: grabbing; }
+.layer-row.active .layer-grip { color: rgba(255, 255, 255, 0.6); }
+/* fingers need a real target; a mouse doesn't */
+@media (pointer: coarse) { .layer-grip { width: 24px; font-size: 15px; } }
+
+.layer-row:hover { background: #f2f2f2; }
+.layer-row.active { background: #000; color: #fff; }
+/* pointer-events:none is load-bearing, not cosmetic: the dragged row follows the pointer, so without
+   it elementFromPoint keeps hitting the row being dragged and the drop target never resolves. */
+.layer-row.dragging { opacity: 0.4; pointer-events: none; }
+/* drag-drop affordances: nest INTO a group (outline+tint), or a "magnet" line BETWEEN
+   rows for reorder (before/after). The crevice the pointer is in picks which. */
+.layer-row.drop-into { outline: 1px solid var(--hl-drop); outline-offset: -1px; background: color-mix(in srgb, var(--hl-drop) 14%, var(--bg)); }
+.layer-row.drop-into.active { background: color-mix(in srgb, var(--hl-drop) 40%, #000); }
+.layer-row.drop-before { box-shadow: inset 0 2px 0 0 var(--hl-drop); }
+.layer-row.drop-after { box-shadow: inset 0 -2px 0 0 var(--hl-drop); }
+.layers-list.drop-root { box-shadow: inset 0 0 0 2px var(--hl-drop); }
+/* group expand/collapse twisty (leaf rows render an invisible spacer to stay aligned) */
+.layer-twist {
+  flex: 0 0 12px; width: 12px; padding: 0; border: 0; background: none; color: var(--muted);
+  font-size: 9px; line-height: 1; cursor: pointer; text-align: center;
+}
+.layer-twist.leaf { visibility: hidden; cursor: default; }
+.layer-row.active .layer-twist { color: rgba(255, 255, 255, 0.85); }
+.layer-row.is-group { font-weight: 600; }
+.layer-swatch.group { background: none; border: 0; display: inline-grid; place-items: center; color: var(--muted); font-size: 12px; }
+.layer-row.active .layer-swatch.group { color: #fff; }
+/* Artboard pinned at the bottom of the stack, like a background layer. */
+.layer-row.artboard-row { border-bottom: none; color: var(--muted); font-style: italic; }
+.layer-row.artboard-row.active { color: #fff; }
+.layer-swatch {
+  flex: 0 0 auto; width: 14px; height: 14px; border: 1px solid var(--line);
+  background-image:
+    linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%);
+  background-size: 8px 8px; background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+}
+/* Raster rows show a live image thumbnail (background-image set inline). */
+.layer-swatch.raster { background-repeat: no-repeat; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15); display: inline-grid; place-items: center; }
+.layer-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layer-btn {
+  flex: 0 0 auto; width: 20px; height: 20px; padding: 0;
+  border: 1px solid transparent; background: transparent; color: inherit;
+  font: inherit; line-height: 1; cursor: pointer; text-align: center;
+}
+.layer-btn:hover { border-color: currentColor; }
+.layer-btn.on { font-weight: 700; }
+.layer-rename { flex: 1 1 auto; min-width: 0; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: inherit; padding: 2px 4px; }
+
+/* collapsible rail sections (accordion): caret + label on the left, any header
+   buttons (History undo/redo) on the right. The layer arrange controls moved to the
+   top-of-canvas toolbar, so the headers have their labels back. */
+.section-head { cursor: pointer; user-select: none; gap: 6px; padding: 7px 8px; }
+.section-head .caret { flex: 0 0 auto; font-size: 10px; color: var(--muted); transition: transform 0.12s; }
+.section-head .sec-label { flex: 1 1 auto; font-size: 12px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* a small count badge next to the History / Layers titles (pushes any header buttons right) */
+.section-head .sec-label:has(+ .sec-count) { flex: 0 1 auto; }
+.section-head .sec-count { flex: 0 0 auto; margin: 0 auto 0 6px; color: var(--muted); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.section-head .sec-count:empty { display: none; }
+/* Artboard pinned to the bottom of the Layers panel (a chin that never scrolls away) */
+.layers-foot { flex: 0 0 auto; border-top: 1px solid var(--hair); }
+.layers-foot:empty { display: none; }
+.rail-section.collapsed .layers-foot { display: none; }
+.rail-section.collapsed .insp-foot { display: none; }   /* hide the align chin when the panel is folded */
+.rail-section.collapsed .library-chin { display: none; }   /* hide the filter/C·R·V chin when the library is folded */
+.rail-section.collapsed .section-head .caret { transform: rotate(-90deg); }
+.rail-section.collapsed .section-body { display: none; }
+/* Dock-aware header: the caret sits on the OUTER (screen) edge and, when collapsed,
+   points toward the canvas; the label hugs the INNER edge. Mirrored per dock side. */
+.leftdock .section-head, .rightdock .section-head { justify-content: flex-start; }
+/* RIGHT dock → label/count left, actions + caret pushed to the right edge, caret last. */
+.rightdock .section-head .sec-label { order: 1; }
+.rightdock .section-head .sec-count { order: 2; margin: 0; }
+.rightdock .section-head .panel-actions { order: 3; margin-left: auto; }
+.rightdock .section-head .caret { order: 4; margin-left: 6px; }
+.rightdock .rail-section.collapsed .section-head .caret { transform: rotate(90deg); }   /* ◄ points inward (actions stay visible + carry the auto-margin) */
+/* LEFT dock → caret on the left edge, label grows + right-aligns so its text hugs the
+   inner edge, count trailing it. */
+.leftdock .section-head .caret { order: 1; }
+.leftdock .section-head .panel-actions { order: 2; }
+.leftdock .section-head .sec-label { order: 3; flex: 1 1 auto; text-align: right; }
+.leftdock .section-head .sec-count { order: 4; margin: 0 0 0 4px; }
+.leftdock .rail-section.collapsed .section-head .caret { transform: rotate(-90deg); }   /* ► points inward */
+/* collapsed keeps the header action buttons reachable (single row, no wrap) */
+.rail-section.collapsed .panel-actions { display: flex; flex-wrap: nowrap; }
+.rail-section.collapsed { flex: 0 0 auto; min-height: 0; }   /* must not reserve flex/min space */
+
+@media (max-width: 900px) {
+  .editor-grid { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .rightdock { display: none; }
+}
+
+.panel-head, .panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.panel-head {
+  justify-content: space-between;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--hair);
+  flex: 0 0 auto;
+}
+
+.panel-head > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* rail-header action buttons (Layers reorder/group/cleanup/rename/delete, History
+   undo/redo) — the same square objects as the tools so the headers read consistently. */
+.panel-actions { gap: 4px; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
+
+/* bottom viewport bar — the bottom run of the picture frame: bordered top (inner
+   edge against the canvas) and bottom (outer edge), same fill as the side bars. */
+.panel-foot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+
+/* Its one child (zoom/select-all/rulers/free-transform/flip) is where an overflow risk
+   actually lives — panel-foot's own `flex: 0 0 auto` on it would just push content past the
+   bar's edges uncontrolled at a narrow desktop width. `flex: 1 1 auto; min-width: 0` bounds it
+   to the available width so `overflow-x: auto` below has something to scroll, same fix as the
+   top arrange bar just above. */
+.viewport-controls {
+  flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; justify-content: safe center;
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+}
+.viewport-controls::-webkit-scrollbar { display: none; }
+.viewport-controls > * { flex: 0 0 auto; }
+
+.preview-frame {
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 10px;
+  overflow: hidden;
+  /* Touch drawing must reach the tools, not scroll/zoom the page. The editor drives its own
+     pan/zoom (one finger = tool, two fingers = pinch/pan via bindViewportTouch). */
+  touch-action: none;
+}
+
+.empty-frame {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+/* Symbols panel (Epic Y): a browsable library — one tile per master, live <use>-based
+   thumbnail (updates automatically as the master is edited, no rasterization/cache). */
+.symbols-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; padding: 4px; gap: 4px; }
+.symbol-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; border-radius: 4px;
+  cursor: grab; font-size: 13px; background: var(--bg);
+}
+.symbol-row:hover { background: #f2f2f2; }
+.symbol-row:active { cursor: grabbing; }
+.symbol-thumb { flex: 0 0 32px; width: 32px; height: 32px; background: var(--field-bg); border: 1px solid var(--border); border-radius: 3px; }
+.symbol-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.symbols-empty { padding: 14px 10px; font-size: 12px; color: var(--muted); text-align: center; }
+.symbol-drag-ghost {
+  position: fixed; z-index: 1200; pointer-events: none;
+  background: rgba(0, 0, 0, 0.82); color: #fff; font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 3px 7px; border-radius: 3px; white-space: nowrap;
+}
+
+.checker {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.viewport-shell.bg-checker,
+.gallery-thumb {
+  background:
+    linear-gradient(45deg, var(--checker-b) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--checker-b) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checker-b) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--checker-b) 75%);
+  background-size: 24px 24px;
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+}
+
+.viewport-shell.bg-white { background: #ffffff; }
+.viewport-shell.bg-black { background: #000000; }
+.viewport-shell.bg-dark  { background: #1c1c1c; }
+
+.viewport-shell {
+  position: relative;
+  overflow: hidden;
+  cursor: default;   /* arrow by default; tools override (crosshair), Hand only with Space */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.viewport-content {
+  transform-origin: center center;
+  /* will-change is toggled on in JS only during active pan/zoom and cleared at
+     rest — a permanent GPU layer caches a bitmap that scales blurry on zoom. */
+  width: max-content;
+  height: max-content;
+}
+
+.viewport-content img,
+.viewport-content svg {
+  display: block;
+  max-width: none;
+  max-height: none;
+  user-select: none;
+  pointer-events: none;
+}
+
+.inline-svg {
+  /* The artboard reads as an obvious sheet floating on the checker pasteboard.
+     overflow stays visible so artwork can spill onto the pasteboard. The white
+     background shows through wherever the artboard fill is "none". */
+  overflow: visible;
+  background: var(--bg);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.20), 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+/* artboard fill = none → show a checker so the sheet reads as transparent (the white
+   background otherwise made a transparent artboard look solid white). */
+.inline-svg.transparent-board {
+  background:
+    linear-gradient(45deg, #dadada 25%, transparent 25%), linear-gradient(-45deg, #dadada 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #dadada 75%), linear-gradient(-45deg, transparent 75%, #dadada 75%), #fff;
+  background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+/* Per-tool canvas cursors (set via .stage-wrap[data-tool]). */
+.stage-wrap[data-tool="marquee"] .viewport-shell, .stage-wrap[data-tool="marquee"] .inline-svg,
+.stage-wrap[data-tool="pen"] .viewport-shell,     .stage-wrap[data-tool="pen"] .inline-svg,
+.stage-wrap[data-tool="curvature"] .viewport-shell, .stage-wrap[data-tool="curvature"] .inline-svg,
+.stage-wrap[data-tool="rect"] .viewport-shell,    .stage-wrap[data-tool="rect"] .inline-svg,
+.stage-wrap[data-tool="ellipse"] .viewport-shell, .stage-wrap[data-tool="ellipse"] .inline-svg,
+.stage-wrap[data-tool="line"] .viewport-shell,    .stage-wrap[data-tool="line"] .inline-svg { cursor: crosshair; }
+.stage-wrap[data-tool="text"] .viewport-shell,    .stage-wrap[data-tool="text"] .inline-svg { cursor: text; }
+/* Select / Transform: move cursor over a pickable object, arrow on empty canvas. */
+.stage-wrap[data-tool="select"] .viewport-shell, .stage-wrap[data-tool="node"] .viewport-shell,
+.stage-wrap[data-tool="transform"] .viewport-shell { cursor: default; }
+.stage-wrap[data-tool="select"] .inline-svg [data-hv-id],
+.stage-wrap[data-tool="transform"] .inline-svg [data-hv-id] { cursor: move; }
+.inline-svg [data-hv-locked="1"] { cursor: default; }
+/* Pen close-path affordance (hovering the first anchor). */
+.stage-wrap.pen-close .viewport-shell, .stage-wrap.pen-close .inline-svg { cursor: pointer; }
+.stage-wrap.pen-tempsel .viewport-shell, .stage-wrap.pen-tempsel .inline-svg { cursor: default; }
+/* Pen auto add/delete affordances over an existing path */
+.stage-wrap.pen-add .viewport-shell, .stage-wrap.pen-add .inline-svg { cursor: copy; }
+.stage-wrap.pen-del .viewport-shell, .stage-wrap.pen-del .inline-svg { cursor: pointer; }
+.hv-pen-add { fill: #16a34a; stroke: #fff; stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
+.hv-pen-del { fill: none; stroke: #dc2626; stroke-width: 1.5; vector-effect: non-scaling-stroke; pointer-events: none; }
+.hv-pen-cont { fill: none; stroke: var(--hl-edit); stroke-width: 1.5; vector-effect: non-scaling-stroke; pointer-events: none; }
+
+/* Spacebar = temporary Hand tool: grab cursor while held (Illustrator). */
+.stage-wrap.space-pan,
+.stage-wrap.space-pan .viewport-shell,
+.stage-wrap.space-pan .inline-svg { cursor: grab; }
+.stage-wrap.space-pan:active,
+.stage-wrap.space-pan .viewport-shell:active { cursor: grabbing; }
+
+/* In-viewport point-editing handles (re-enable pointer events the svg disables) */
+.hv-handle {
+  fill: #fff;
+  stroke: #000;
+  stroke-width: 0.5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: all;
+  cursor: grab;
+}
+.hv-handle:hover { fill: #000; }
+.hv-handle.dragging { fill: #000; cursor: grabbing; }
+/* Node-tool path anchors (square) + draggable bezier direction handles (round) */
+.hv-node-anchor { fill: #fff; stroke: var(--hl-edit); stroke-width: 1; }
+.hv-node-anchor:hover { fill: var(--hl-hover); }
+.hv-node-anchor.selected { fill: var(--hl-edit); stroke: #fff; stroke-width: 1.5; }
+.hv-node-handle-line { stroke: var(--hl-edit); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; opacity: 0.55; }
+.hv-node-handle { fill: var(--hl-edit); stroke: #fff; stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: all; cursor: grab; }
+.hv-node-handle:hover { fill: #000; }
+.hv-node-handle.dragging { fill: #000; cursor: grabbing; }
+.hv-whandles { pointer-events: none; }
+.hv-whandle { fill: #fff; stroke: var(--hl-edit); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.stage-wrap[data-tool="width"] svg { cursor: crosshair; }
+/* Envelope distort (Epic D.2/D.3): the RxC grid — thin dashed cage lines + square handles,
+   same non-scaling/pointer-events-none idiom as the width tool's on-spine diamonds. */
+.hv-envhandles { pointer-events: none; }
+.hv-envgridline { stroke: var(--hl-edit); stroke-width: 1; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; opacity: 0.6; }
+.hv-envhandle { fill: #fff; stroke: var(--hl-edit); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.stage-wrap[data-tool="envelope"] svg { cursor: crosshair; }
+/* Gradient mesh (Epic D.4): the RxC position grid — identical idiom to Envelope's own cage,
+   drawn in the same on-canvas style so the two draggable-grid tools read as one family. */
+.hv-meshhandles { pointer-events: none; }
+.hv-meshgridline { stroke: var(--hl-edit); stroke-width: 1; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; opacity: 0.6; }
+.hv-meshhandle { fill: #fff; stroke: var(--hl-edit); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.stage-wrap[data-tool="mesh"] svg { cursor: crosshair; }
+/* Epic B path-construction tools: live drag trail + cursors */
+.hv-btrail { fill: none; stroke: var(--hl-edit); stroke-width: 1.5; vector-effect: non-scaling-stroke; pointer-events: none; }
+.hv-btrail-knife { stroke: #e23; stroke-dasharray: 4 3; }
+.hv-btrail-erase { stroke: #888; stroke-width: 2; opacity: 0.7; }
+.hv-btrail-build { stroke: var(--hl-edit); stroke-width: 2.5; opacity: 0.6; }
+.stage-wrap[data-tool="shapebuilder"] svg, .stage-wrap[data-tool="knife"] svg, .stage-wrap[data-tool="eraser"] svg { cursor: crosshair; }
+.stage-wrap[data-tool="scissors"] svg { cursor: crosshair; }
+/* Epic I — Isolation mode: dim + disable everything outside the isolated group. NESTED: every
+   level of the stack carries .hv-iso-keep (not just the deepest), so this second rule — dim the
+   unmarked direct children of an INTERMEDIATE kept group, not just the stage's own — recurses to
+   arbitrary depth automatically: only the direct path from the stage down to the deepest level
+   stays lit, siblings at every INTERMEDIATE level get dimmed same as top-level siblings always
+   did. The DEEPEST level also carries .hv-iso-active and is explicitly EXCLUDED from this rule —
+   its own children are the active editing scope and must stay fully lit + interactive, not dimmed
+   the same as an intermediate level's off-path siblings would be. */
+svg.hv-iso > [data-hv-id]:not(.hv-iso-keep) { opacity: 0.25; pointer-events: none; }
+svg.hv-iso .hv-iso-keep:not(.hv-iso-active) > [data-hv-id]:not(.hv-iso-keep) { opacity: 0.25; pointer-events: none; }
+svg.hv-iso > .hv-ablayer, svg.hv-iso > rect.hv-artboard { opacity: 0.4; }
+.hv-iso-crumb { position: absolute; top: 8px; left: 8px; z-index: 7; display: flex; align-items: center; gap: 6px;
+  background: var(--panel); border: 1px solid var(--hair); border-radius: var(--r); padding: 3px 8px 3px 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+  max-width: calc(100% - 16px); overflow-x: auto; }
+.hv-iso-back { font: inherit; font-size: 12px; line-height: 1; cursor: pointer; border: 1px solid var(--hair); border-radius: 3px; background: var(--bg); color: var(--ink); padding: 3px 7px; flex: none; }
+.hv-iso-back:hover { border-color: var(--hl-hover); color: var(--hl-hover); }
+.hv-iso-sep { font-size: 12px; color: var(--muted); flex: none; }
+.hv-iso-name { font-size: 12px; color: var(--muted); white-space: nowrap; }
+button.hv-iso-name.hv-iso-link { font: inherit; cursor: pointer; border: none; background: none; padding: 0; color: var(--muted); text-decoration: underline dotted; }
+button.hv-iso-name.hv-iso-link:hover { color: var(--hl-hover); }
+/* Epic C — Recolor swatch grid. `flex: 0 0 20px` + min/max + align-self pin each swatch to a
+   fixed 20×20 box so no flex stretch/shrink (from any ancestor) can collapse them into thin tall bars. */
+.insp-recolor-grid { display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start; gap: 4px; }
+.insp-recolor-sw { flex: 0 0 20px; box-sizing: border-box; width: 20px; height: 20px; min-width: 20px; max-width: 20px; min-height: 20px; max-height: 20px; align-self: center; padding: 0; border: 1px solid var(--hair); border-radius: 3px; cursor: pointer; }
+.insp-recolor-sw:hover { outline: 1px solid var(--hl-hover); }
+/* Recolor mode in the dock Colour panel: a back/Done bar above the solo picker. */
+.cp-recolor-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.cp-recolor-bar .cp-recolor-lab { font-size: 11px; color: var(--label); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-recolor-done { flex: 0 0 auto; }
+/* Pen-tool anchor markers (while a path is being drawn) */
+.hv-pen-anchor { fill: #fff; stroke: var(--hl-edit); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
+.hv-pen-anchor.first { fill: var(--hl-edit); }
+.hv-pen-anchor.close { fill: var(--hl-edit); stroke: #fff; stroke-width: 1.5; }
+/* Read-only anchor dots of the selected path (pen tool) — shows where +/− will act */
+.hv-pen-point { fill: #fff; stroke: var(--hl-edit); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
+/* Pen direction handles (bezier tangents shown while drawing) */
+.hv-pen-handle-line { stroke: var(--hl-edit); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; opacity: 0.6; }
+.hv-pen-handle { fill: var(--hl-edit); stroke: #fff; stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
+/* Transform-tool bounding box + scale handles */
+.hv-xform-box { fill: none; stroke: var(--hl-edit); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
+/* before/after: dashed ghost of the original bounds shown during a scale */
+.hv-xform-ghost { fill: none; stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; opacity: 0.7; }
+/* rotation handles — visible circles set outside the corners; subtle in scale mode,
+   emphasized in rotate mode. (cursor 'grab' as a stand-in for a rotate cursor) */
+/* The thumb-sized target that sits invisibly over a handle. A finger needs ~44px; a 44px handle you
+   could SEE would cover the shape you're resizing. So: hit it here, look at the one underneath. */
+.hv-xform-hit { fill: transparent; stroke: none; pointer-events: all; }
+.hv-xform-rot { fill: #fff; stroke: var(--hl-edit); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: all; cursor: grab; opacity: 0.45; }
+.hv-xform-rot:hover { opacity: 1; fill: var(--hl-hover); }
+.hv-xform-rotate .hv-xform-rot { opacity: 1; }
+.hv-xform-handle { fill: #fff; stroke: var(--hl-edit); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: all; }
+.hv-xform-handle:hover { fill: var(--hl-hover); }
+.hv-xform-handle.dragging { fill: var(--hl-edit); }
+/* on-canvas gradient editor (G.4): a direction line/ring + draggable endpoint handles */
+.hv-gradedit-line, .hv-gradedit-ring { fill: none; stroke: var(--hl-edit); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
+.hv-gradedit-ring { opacity: 0.7; }
+.hv-gradedit-handle { fill: #fff; stroke: var(--hl-edit); stroke-width: 1.5; vector-effect: non-scaling-stroke; pointer-events: all; cursor: grab; }
+.hv-gradedit-handle:hover { fill: var(--hl-hover); }
+.hv-xform-nw, .hv-xform-se { cursor: nwse-resize; }
+.hv-xform-ne, .hv-xform-sw { cursor: nesw-resize; }
+.hv-xform-n,  .hv-xform-s  { cursor: ns-resize; }
+.hv-xform-e,  .hv-xform-w  { cursor: ew-resize; }
+/* Drag-select marquee / lasso */
+.hv-marquee { fill: rgba(0, 122, 255, 0.12); stroke: var(--hl-edit); stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+.hv-guide { stroke: #ff2d92; stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
+/* Persistent ruler guides: a thin cyan line plus a wide transparent hit target. */
+.hv-guideobj { stroke: #18b6c9; stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
+.hv-guidehit { stroke: transparent; stroke-width: 9; vector-effect: non-scaling-stroke; pointer-events: stroke; }
+/* Extra-artboard chrome frames + labels (Epic A) — visual only, stripped on export. */
+.hv-abframe { fill: none; stroke: #4a90d9; stroke-width: 1.5; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+/* On-canvas artboard tool (Epic K.3): the drag-to-create rubber-band, matching .hv-abframe's
+   own colour so the preview reads as a direct look-ahead of the frame it will become. */
+.hv-artboard-preview { fill: none; stroke: #4a90d9; stroke-width: 1.5; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+.hv-ablabel { fill: #4a90d9; font: 12px var(--ui-font, system-ui, sans-serif); pointer-events: none; }
+.hv-abframe.selected { stroke-width: 2.5; }
+/* On-canvas move/resize handles for an EXISTING extra artboard (Epic K.3). The move target is
+   stroke-only hit-testing (like .hv-guidehit above) so the artboard's own INTERIOR stays fully
+   click-through to real artwork — only the border itself drags the frame. */
+.hv-ab-movehit { fill: none; stroke: transparent; pointer-events: stroke; cursor: move; vector-effect: non-scaling-stroke; }
+.hv-ab-handle { fill: #fff; stroke: #4a90d9; stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: all; }
+.hv-ab-handle:hover { fill: var(--hl-hover); }
+.hv-ab-nw, .hv-ab-se { cursor: nwse-resize; }
+.hv-ab-ne, .hv-ab-sw { cursor: nesw-resize; }
+.hv-ab-n,  .hv-ab-s  { cursor: ns-resize; }
+.hv-ab-e,  .hv-ab-w  { cursor: ew-resize; }
+.insp-ab-row .insp-ab-name { flex: 1; min-width: 0; }
+input.insp-ab-name { background: var(--field-bg); color: inherit; border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; }
+.xform-readout { position: fixed; z-index: 1100; background: rgba(0, 0, 0, 0.82); color: #fff; font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 3px 7px; pointer-events: none; white-space: nowrap; }
+.xform-readout[hidden] { display: none; }
+
+/* Dropdown menus in the panel heads */
+.menu {
+  position: relative;
+  display: inline-flex;
+}
+.menu[hidden] { display: none; }
+
+.menu-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;          /* open rightward from the trigger (keeps left-edge menus in bounds) */
+  right: auto;
+  /* Above the bars, below the modals. It was 40 — under chrome that used to sit right beside the
+     File button on a phone, so the dropdown opened *behind* what it overlapped.
+     Order of this app's world: FAB 55 · scrim 58 · sheet 60 · [menus 70] · modal 100. */
+  z-index: 70;
+  min-width: 190px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  gap: 2px;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.12);
+}
+.menu-list[hidden] { display: none; }
+/* Right-edge menus (the Layers kebab) open leftward so they stay in bounds. */
+.menu[data-menu="layers"] .menu-list { left: auto; right: 0; }
+/* right-click context menu reuses .menu-list styling but is viewport-positioned */
+.context-menu { position: fixed; top: auto; right: auto; z-index: 1000; max-height: 80vh; overflow-y: auto; }
+/* Object context panel = style editors (canvas panel adds an actions grid). overflow-x
+   hidden kills the stray horizontal scrollbar (overflow-y:auto otherwise computes
+   overflow-x:auto); min-width:0 lets the rows shrink to the panel width. */
+.context-panel { width: 248px; padding: 0; overflow-x: hidden; background: var(--bg); border: 1px solid var(--line); box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.12); display: flex; flex-direction: column; }
+.context-panel .ctx-head { font-size: 12px; font-weight: 600; letter-spacing: 0.02em; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.context-panel .ctx-style { padding: 12px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.context-panel .ctx-style > div { min-width: 0; }
+/* persistent floating Properties window: a draggable titlebar over a live body */
+.float-panel { position: fixed; z-index: 1000; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.28); }
+.float-panel[hidden] { display: none; }
+.fp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 6px 5px 12px; border-bottom: 1px solid var(--line); cursor: move; user-select: none; -webkit-user-select: none; touch-action: none; }
+.fp-title { font-size: 12px; font-weight: 600; letter-spacing: 0.02em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-close { flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border: 1px solid transparent; background: none; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; display: grid; place-items: center; }
+.fp-close:hover { color: var(--on-ink); background: var(--hl-hover); border-color: var(--hl-hover); }
+.fp-body { padding: 11px 12px; display: flex; flex-direction: column; gap: 15px; min-width: 0; overflow-y: auto; max-height: calc(100vh - 130px); }
+.fp-body > div { min-width: 0; }
+.context-panel .ctx-actions { border-top: 1px solid var(--line); padding: 6px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.grid-item { aspect-ratio: 1 / 1; display: grid; place-items: center; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font-size: 15px; line-height: 1; cursor: pointer; padding: 0; }
+.grid-item:hover { background: #f2f2f2; }
+.grid-item:disabled { opacity: 0.3; cursor: default; }
+.grid-item.text { font-size: 8px; padding: 2px; text-align: center; overflow: hidden; }
+.grid-sep { grid-column: 1 / -1; height: 1px; background: var(--line); margin: 1px 0; }
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 7px 9px;
+  font: inherit;
+  white-space: nowrap;
+}
+.menu-item:not(:disabled):hover { border-color: var(--line); }
+.menu-item:disabled { opacity: 0.4; cursor: default; }
+.menu-item.checked { font-weight: 600; }
+.menu-check {
+  width: 12px;
+  flex: 0 0 12px;
+  text-align: center;
+}
+.menu-label { flex: 1 1 auto; }
+.menu-item.checked .menu-check { color: var(--hl-on); }
+/* "edited" pill: the live arrangement diverges from the selected baseline */
+.menu-badge { flex: 0 0 auto; margin-left: 6px; font-size: 10px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: 3px; padding: 0 4px; line-height: 15px; }
+/* manageable menu row (Layout profiles): label + inline rename / delete buttons.
+   The label carries the same real .menu-check gutter as a plain item (no faked indent). */
+.menu-row { padding: 2px 6px 2px 9px; gap: 2px; }
+.menu-row .menu-rowlabel { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; text-align: left; padding: 5px 5px 5px 9px; border: 1px solid transparent; background: var(--bg); color: var(--fg); font: inherit; cursor: pointer; white-space: nowrap; }
+.menu-row .menu-rowlabel.checked { font-weight: 600; }
+.menu-row .menu-rowlabel.checked .menu-check { color: var(--hl-on); }
+.menu-row .menu-rowlabel .menu-label { overflow: hidden; text-overflow: ellipsis; }
+.menu-row .menu-rowlabel:hover { border-color: var(--line); }
+.menu-row .menu-rowbtn { flex: 0 0 auto; width: 24px; height: 26px; border: 1px solid transparent; background: var(--bg); color: var(--muted); font-size: 12px; cursor: pointer; }
+.menu-row .menu-rowbtn:hover { color: var(--on-ink); background: var(--hl-hover); border-color: var(--hl-hover); }
+.menu-sep {
+  height: 1px;
+  background: var(--line);
+  opacity: 0.4;
+  margin: 3px 2px;
+}
+/* flyout trigger row — a "›" instead of a checkmark gutter; the submenu itself just reuses
+   .context-menu.menu-list, portalled beside this item (see menus.js placeSubmenu). */
+.menu-sub-arrow { flex: 0 0 auto; margin-left: 6px; color: var(--muted); font-size: 13px; line-height: 1; }
+
+.status-bar {
+  min-height: 48px;
+}
+
+.force-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  user-select: none;
+  padding: 0 6px;
+  cursor: pointer;
+  color: var(--fg-muted);
+}
+
+.force-toggle input {
+  accent-color: #f0a020;
+  cursor: pointer;
+}
+
+.badge {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 6px;
+  margin-left: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  border-radius: 8px;
+  background: #444;
+  color: #fff;
+  text-align: center;
+}
+
+.badge.badge-busy { background: #2a7adf; }
+.badge.badge-fail { background: #c0382b; }
+
+/* Processor panel — the pipeline as a vertical flow rail (stacked stage cards with
+   flow connectors, drag to reorder, expand for settings). */
+.processor-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px; }
+.proc-rail { display: flex; flex-direction: column; gap: 10px; }
+.proc-target { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); min-width: 0; }
+.proc-target-ic { flex: 0 0 auto; }
+/* The currently-loaded image: a real thumbnail makes "what am I processing" unmistakable. */
+.proc-target-thumb { flex: 0 0 auto; width: 34px; height: 34px; object-fit: cover; border: 1px solid var(--line); border-radius: var(--r);
+  background: repeating-conic-gradient(#e9e9e9 0% 25%, #fff 0% 50%) 50% / 12px 12px; }
+.proc-target-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; color: var(--ink); font-weight: 600; font-size: 13px; }
+.proc-target.batch .proc-target-name { color: var(--muted); }
+.proc-target.batch .proc-target-name { font-style: italic; }
+.proc-target-swap { flex: 0 0 auto; height: 22px; min-width: 26px; font-size: 12px; }
+.proc-target-swap.on { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+.proc-stages { display: flex; flex-direction: column; gap: 14px; }
+.proc-stage { position: relative; border: 1px solid var(--hair); border-radius: var(--r); background: var(--bg); }
+.proc-stage.off { opacity: 0.55; }
+.proc-stage.dragging { opacity: 0.4; }
+.proc-stage.expanded { border-color: var(--hair-2); }
+/* flow connector: a short vertical tick rising into each card after the first */
+.proc-stage:not(:first-child)::before { content: ""; position: absolute; left: 22px; top: -14px; width: 2px; height: 14px; background: var(--hair-2); }
+.proc-stage-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+/* touch-action:none is what makes the grip actually grab on a phone — without it the browser
+   claims the gesture as a scroll of the Processor panel and the card never moves. */
+.proc-grip { cursor: grab; color: var(--muted); user-select: none; font-size: 12px; line-height: 1; touch-action: none; }
+.proc-grip:active { cursor: grabbing; }
+@media (pointer: coarse) { .proc-grip { font-size: 16px; padding: 4px; } }
+.proc-stage-title { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+.proc-stage-title .stage-name { font-weight: 600; font-size: 12.5px; color: var(--ink); }
+.proc-stage-title .stage-note { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.proc-stage .stage-caret { color: var(--muted); flex: 0 0 auto; }
+.proc-stage .pipeline-detail-body { border-top: 1px solid var(--hair); padding: 8px 10px; margin: 0; }
+/* Standard chin: pinned below the scrolling stage list, ink top-border (matches
+   .library-chin / .insp-foot). Run is pushed to the right edge. */
+.processor-chin { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; border-top: 1px solid var(--ink); padding: 5px 8px; }
+.processor-chin:empty { display: none; }
+/* Run — one inky chin control (black-on-white, hover punches to black). Compact, not the
+   divergent blue primary-button. */
+.processor-chin .proc-run {
+  margin-left: auto; height: 24px; padding: 0 12px; font-size: 11.5px; font-weight: 600;
+  border: 1px solid var(--ink); background: var(--bg); color: var(--ink); cursor: pointer; border-radius: var(--r);
+}
+.processor-chin .proc-run:hover:not(:disabled) { background: var(--ink); color: var(--on-ink); }
+.processor-chin .proc-run:disabled { opacity: 0.4; cursor: default; }
+.rail-section.collapsed .processor-chin { display: none; }
+/* Contextual dim: nothing to process (no raster selected, not batch) — muted, but the
+   panel stays put. It un-dims + reveals the moment a raster becomes the subject. */
+.rail-section.processor.dimmed .processor-body, .rail-section.processor.dimmed .processor-chin { opacity: 0.45; }
+.rail-section.processor.dimmed .sec-label::after { content: " · idle"; color: var(--muted); font-weight: 400; }
+.proc-foot-hint { font-size: 11px; color: var(--muted); }
+.proc-foot-load { font: inherit; font-size: 11px; height: 24px; padding: 0 10px; border: 1px solid var(--ink); background: var(--bg); color: var(--ink); cursor: pointer; border-radius: var(--r); }
+.proc-foot-load:hover { background: var(--ink); color: var(--on-ink); }
+/* Auto-pipeline surface (#50): the analyzer's read + suggested compose, above the strip. */
+.proc-auto { display: flex; flex-direction: column; gap: 8px; padding: 9px 10px; border: 1px solid var(--hair-2); border-radius: var(--r); background: var(--paper); }
+.proc-auto.muted { color: var(--muted); font-size: 11.5px; font-style: italic; }
+.proc-auto-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.proc-auto-badge { flex: 0 0 auto; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 1px 6px; border-radius: 9px; background: var(--ink); color: var(--on-ink); }
+.proc-auto-sum { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
+.proc-auto-steps, .proc-auto-offered { display: flex; flex-direction: column; gap: 5px; }
+/* display:flex OVERRIDES the [hidden] attribute's default display:none — so a collapsed "Also
+   possible" list stayed fully rendered (34 rows, and a 3541px sheet). Say it explicitly. */
+.proc-auto-steps[hidden], .proc-auto-offered[hidden] { display: none; }
+.proc-auto-none { font-size: 11.5px; color: var(--muted); }
+.proc-plan-step { display: flex; align-items: baseline; gap: 6px; font-size: 11.5px; min-width: 0; }
+.proc-plan-cap { flex: 0 0 auto; font-weight: 600; color: var(--ink); }
+.proc-plan-why { flex: 1 1 auto; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.proc-plan-badge.needs { flex: 0 0 auto; font-size: 10px; padding: 0 5px; border: 1px solid var(--hair-2); border-radius: 8px; color: var(--muted); white-space: nowrap; }
+.proc-plan-add { flex: 0 0 auto; font: inherit; font-size: 10.5px; height: 19px; padding: 0 8px; border: 1px solid var(--ink); background: var(--bg); color: var(--ink); cursor: pointer; border-radius: var(--r); }
+
+.proc-plan-add:hover { background: var(--ink); color: var(--on-ink); }
+.proc-auto-apply { align-self: flex-start; height: 24px; padding: 0 14px; font-size: 11.5px; font-weight: 600; border: 1px solid var(--ink); background: var(--ink); color: var(--on-ink); cursor: pointer; border-radius: var(--r); }
+.proc-auto-apply:hover:not(:disabled) { opacity: 0.85; }
+.proc-auto-apply:disabled { opacity: 0.4; cursor: default; }
+.proc-auto-offered { border-top: 1px dashed var(--hair-2); padding-top: 7px; }
+.proc-auto-offered-lbl { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+
+/* Intent-first stage controls (#49): Outcome picker → Auto badge → collapsed Advanced. */
+.intent-auto { display: flex; align-items: center; gap: 6px; margin: 4px 0 2px; font-size: 11.5px; flex-wrap: wrap; }
+.intent-auto.muted { color: var(--muted); font-style: italic; }
+.intent-auto-tag { flex: 0 0 auto; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 1px 6px; border-radius: 9px; background: var(--ink); color: var(--on-ink); }
+.intent-auto-model { color: var(--ink); font-weight: 600; }
+.intent-auto-need { flex: 0 0 auto; font: inherit; font-size: 10.5px; padding: 0 7px; height: 19px; border: 1px solid var(--hair-2); border-radius: 8px; background: var(--bg); color: var(--muted); cursor: pointer; }
+.intent-auto-need:hover { background: var(--ink); color: var(--on-ink); }
+.stage-adv-toggle { display: block; width: 100%; text-align: left; margin-top: 8px; padding: 4px 0; font: inherit; font-size: 11.5px; font-weight: 600; color: var(--muted); background: none; border: 0; border-top: 1px solid var(--hair); cursor: pointer; }
+.stage-adv-toggle:hover { color: var(--ink); }
+.stage-adv { padding-top: 4px; }
+
+/* Settings → AI models & tools: registry-driven capability/model inventory (#51) */
+.cap-group { border: 1px solid var(--hair); border-radius: var(--r); padding: 8px 10px; margin: 8px 0; }
+.cap-group-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.cap-group-title { font-weight: 600; color: var(--ink); font-size: 12.5px; }
+.cap-group-count { color: var(--muted); font-size: 11px; }
+.cap-model { display: flex; align-items: baseline; gap: 8px; padding: 2px 0; font-size: 11.5px; }
+.cap-model-name { color: var(--ink); flex: 0 0 auto; }
+.cap-model-meta { color: var(--muted); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cap-model-state { flex: 0 0 auto; font-size: 10px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; padding: 1px 6px; border-radius: 9px; }
+.cap-model-state.is-ready { background: var(--ink); color: var(--on-ink); }
+.cap-model-state.is-need { border: 1px solid var(--hair-2); color: var(--muted); }
+.cap-model-state.is-soon { color: var(--muted); font-style: italic; text-transform: none; font-weight: 500; letter-spacing: 0; }
+.cap-group-action { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+
+/* Object-removal (LaMa) cleanup overlay + launcher (#56) */
+.proc-cleanup-btn { display: block; width: 100%; margin: 6px 0 2px; padding: 7px 10px; font: inherit; font-size: 12px; font-weight: 600;
+  text-align: left; color: var(--ink); background: var(--bg); border: 1px solid var(--hair); border-radius: var(--r); cursor: pointer; }
+.proc-cleanup-btn:hover { background: var(--surface); border-color: var(--hair-2); }
+.cleanup-overlay { position: fixed; inset: 0; z-index: 9000; background: rgba(0,0,0,0.18); }
+.cleanup-canvas { position: fixed; cursor: crosshair; touch-action: none; outline: 1px dashed var(--ink); outline-offset: 0; }
+.cleanup-bar { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; background: var(--bg); border: 1px solid var(--hair); border-radius: var(--r); box-shadow: 0 4px 20px rgba(0,0,0,0.25); }
+.cleanup-hint { font-size: 12px; color: var(--muted); }
+.cleanup-bar input[type="range"] { width: 120px; }
+
+/* Degradation-fix row (#58): compact denoise / de-JPEG / deblur buttons */
+.proc-fix-row { display: flex; gap: 6px; margin: 2px 0 4px; }
+.proc-fix-btn { flex: 1 1 0; padding: 6px 4px; font: inherit; font-size: 11px; font-weight: 600; color: var(--ink);
+  background: var(--bg); border: 1px solid var(--hair); border-radius: var(--r); cursor: pointer; }
+.proc-fix-btn:hover { background: var(--surface); border-color: var(--hair-2); }
+.stage-restore-note { margin: 2px 0; font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+
+/* compact Properties "Process" pointer (the pipeline lives in the Processor panel now) */
+.raster-tools-compact { display: flex; flex-direction: column; gap: 8px; }
+
+.jobs-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.jobs-empty {
+  padding: 18px;
+  text-align: center;
+  color: var(--fg-muted);
+}
+
+.job-row {
+  display: grid;
+  grid-template-columns: 84px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.job-row .job-status {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-align: center;
+  padding: 4px 0;
+  background: #eee;
+  color: #555;
+}
+
+.job-row.queued .job-status { background: #e3edff; color: #1b4f9b; }
+.job-row.running .job-status { background: var(--accent); color: var(--on-ink); }
+.job-row.done .job-status { background: #dff3e3; color: #1e6b34; }
+.job-row.failed .job-status { background: #fde3df; color: #9b2c20; }
+.job-row.cancelled .job-status { background: #eee; color: #666; }
+
+.job-row .job-meta { min-width: 0; }
+.job-row .job-summary {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.job-row .job-log {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.job-row .job-actions {
+  display: flex;
+  gap: 6px;
+}
+.job-row .job-actions .ghost-button {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.job-progress {
+  position: relative;
+  height: 14px;
+  background: #e6e6e6;
+  overflow: hidden;
+  margin: 4px 0 2px;
+}
+.job-progress-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent);
+  transition: width 150ms ease;
+}
+.job-progress-label {
+  position: relative;
+  display: block;
+  text-align: center;
+  font-size: 10px;
+  color: #fff;
+  line-height: 14px;
+  text-shadow: 0 0 2px rgba(0,0,0,0.5);
+}
+.job-outputs {
+  font-size: 11px;
+  color: #1e6b34;
+  margin-top: 2px;
+}
+
+#status-text {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#status-text.status-error {
+  color: #c0392b;
+  font-weight: 600;
+}
+
+.form-hint.status-error {
+  color: #ff7878;
+}
+
+#status-text.status-clickable {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+#status-text.status-clickable:hover {
+  color: #ffb070;
+}
+
+.topbar-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.output-panel {
+  grid-template-rows: auto auto 1fr;
+}
+
+.output-picker {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.output-pick {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  padding: 4px 8px;
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.output-pick.active {
+  background: #000;
+  color: #fff;
+}
+
+.modal-root {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  /* Above EVERYTHING. This used to be 50, i.e. below the phone's FAB (55), scrim (58) and bottom
+     sheet (60) — so any modal opened on a phone rendered underneath them, with the FAB floating on
+     top of it. That hit Settings too, not just the new picker. A modal is the frontmost thing there
+     is; nothing in the chrome should ever cover it. */
+  z-index: 100;
+}
+
+.modal-root[hidden] { display: none; }
+
+/* DIM, not wash. This was rgba(255,255,255,0.7) — white — behind a white window with a hairline
+   border, sitting over a white canvas. On a desktop you get away with it; on a phone held at arm's
+   length the dialog genuinely reads as "nothing happened", which is exactly what it was reported as.
+   A modal has to announce that the world behind it has stopped. */
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.modal-window {
+  position: relative;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  width: min(960px, 92vw);
+  /* dvh: vh is the TALL viewport on iOS (it ignores Safari's toolbars), so a vh-capped dialog can be
+     taller than the screen it is centred in — and its buttons end up under the browser chrome. */
+  max-height: 88dvh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+}
+.modal-window.modal-narrow { width: min(460px, 92vw); }
+
+/* ---- Pipeline stage cards (Processor dock panel) ---- */
+.gallery-cell.processed .gallery-caption { color: var(--accent); }
+
+/* stage toggle checkbox (name/note/caret are styled by .proc-stage-* above) */
+.stage-toggle { flex: 0 0 auto; width: 15px; height: 15px; cursor: pointer; }
+
+/* expanded stage settings — dense form grid (label -> control -> tiny hint) */
+.pipeline-detail-body.form { padding: 11px 13px; display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 10px 14px; align-content: start; }
+.pipeline-detail-body .form-row { display: flex; flex-direction: column; align-items: stretch; gap: 3px; }
+.pipeline-detail-body .form-label { font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; }
+.pipeline-detail-body .form-hint { font-size: 10.5px; line-height: 1.3; color: var(--muted); opacity: 0.8;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-clamp: 2; overflow: hidden; }
+.pipeline-detail-body select, .pipeline-detail-body .form-input { width: 100%; box-sizing: border-box; padding: 5px 7px; }
+.pipeline-detail-body .form-range { grid-template-columns: 1fr 30px; gap: 9px; }
+.pipeline-detail-body .form-range output { font-size: 11.5px; color: var(--label); }
+.pipeline-detail-body .form-section { grid-column: 1 / -1; margin-top: 2px; }
+.pipeline-detail-body .form-actions { grid-column: 1 / -1; }
+
+/* ---- Library dock panel: the gallery as a first-class panel object ----
+   Lives in the rail (narrow), so the grid packs tighter than the Process view's. */
+/* body flexes + scrolls; the chin below stays pinned (also fixes detached scroll). */
+.library-list { flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow-y: auto; padding: 8px; }
+.library-list .gallery-grid { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; }
+.library-list .gallery-caption { padding: 4px 6px; font-size: 11px; }
+.gallery-thumb-proj { font-size: 30px; color: var(--muted); }   /* .hv project tile (no image) */
+.gallery-thumb-loading { background: var(--surface); }            /* SVG thumb being rasterised */
+
+/* Library chin — a standard chin (ink top-border) with filter (~2/3) + C/R/V toggle. */
+.library-chin { flex: 0 0 auto; display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--ink); padding: 7px 8px; }
+.library-chin .library-filter { flex: 1 1 auto; min-width: 0; box-sizing: border-box; }
+.lib-mode-btns, .lib-sort { flex: 0 0 auto; display: flex; }
+.lib-mode, .lib-sort-dir, .lib-sort-key { width: 24px; height: var(--field-h); border: 1px solid var(--hair); border-left-width: 0; background: var(--bg); color: var(--ink); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
+.lib-mode:first-child, .lib-sort > :first-child { border-left-width: 1px; }
+.lib-mode:hover:not(.active), .lib-sort-dir:hover:not(.active), .lib-sort-key:hover { background: var(--surface); }
+.lib-mode.active, .lib-sort-dir.active { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+
+/* invisible-scroll-with-hint: a tile bar scrolls when crowded (no visible scrollbar);
+   a soft edge fade appears ONLY while it overflows (toggled by observeOverflow), so a
+   bar that fits is never clipped. Reused by panel-header tile bars + viewport strips. */
+.tile-scroll-x { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; min-width: 0; }
+.tile-scroll-y { overflow-y: auto; overflow-x: hidden; scrollbar-width: none; min-height: 0; }
+.tile-scroll-x::-webkit-scrollbar, .tile-scroll-y::-webkit-scrollbar { width: 0; height: 0; display: none; }
+.tile-scroll-x.is-overflowing { -webkit-mask-image: linear-gradient(to right, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%); mask-image: linear-gradient(to right, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%); }
+.tile-scroll-y.is-overflowing { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%); }
+
+.primary-button {
+  border: 1px solid var(--accent); background: var(--accent); color: var(--on-ink);
+  padding: 7px 14px; font: inherit; cursor: pointer; font-weight: 600;
+}
+.primary-button:hover { filter: brightness(1.08); }
+
+/* ---- chin (footer) live progress ---- */
+.status-bar { gap: 12px; }
+#status-text { flex: 0 1 auto; }
+.status-progress { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.status-progress[hidden] { display: none; }
+.status-progress-track { flex: 1 1 auto; height: 6px; background: #e6e6e6; overflow: hidden; min-width: 60px; }
+.status-progress-bar { height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
+.status-progress-bar.indeterminate { width: 40% !important; animation: hv-indet 1.1s ease-in-out infinite; }
+.status-progress-label { flex: 0 0 auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
+@keyframes hv-indet { 0% { transform: translateX(-120%); } 100% { transform: translateX(320%); } }
+
+
+.modal-search {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  padding: 6px 10px;
+  font: inherit;
+  min-width: 160px;
+}
+
+.modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 10px;
+}
+
+.gallery-cell {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  display: grid;
+  grid-template-rows: auto auto auto;   /* square thumb governs its own height */
+  text-align: left;
+  padding: 0;
+  font: inherit;
+  color: var(--fg);
+  min-width: 0;                          /* let the track shrink — don't widen the modal */
+  overflow: hidden;
+}
+
+/* The active (currently-loaded) tile must stand out among 50 — accent ring + tinted frame +
+   a corner pip, not a thin black outline that's lost in the grid. */
+.gallery-cell.active {
+  outline: 2px solid var(--hl-on);
+  outline-offset: -2px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--hl-on) 22%, transparent);
+}
+.gallery-cell.active .gallery-caption { background: var(--hl-on); color: var(--on-ink); font-weight: 600; }
+.gallery-cell.active .gallery-thumb::after {
+  content: "●"; position: absolute; top: 4px; right: 5px; font-size: 11px; line-height: 1;
+  color: var(--hl-on); text-shadow: 0 0 0 1px #fff, 0 0 3px #fff;
+}
+.gallery-thumb { position: relative; }
+
+.gallery-thumb {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background-size: 18px 18px;
+  background-position: 0 0, 0 9px, 9px -9px, -9px 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.gallery-thumb-button {
+  all: unset;
+  display: block;
+  cursor: pointer;
+  width: 100%;
+}
+
+.gallery-thumb-button:focus-visible {
+  outline: 2px solid #000;
+  outline-offset: -2px;
+}
+
+/* compact icon actions — five fit a narrow cell without clipping. min-width:0 lets
+   this grid item shrink to the (auto-fill floor) track so the flex:1 icons share it
+   instead of overflowing the cell when the gallery is wide (many narrow columns). */
+.gallery-actions {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  min-width: 0;
+}
+
+.gallery-act {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.gallery-act:hover { background: var(--hl-hover); color: var(--on-ink); }
+
+/* the entire object, centred and scaled to fit the square — never cropped */
+.gallery-thumb img,
+.gallery-thumb svg {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+}
+
+.gallery-caption {
+  border-top: 1px solid var(--line);
+  padding: 6px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+
+.gallery-empty {
+  color: var(--muted);
+  padding: 24px;
+  text-align: center;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.form-section {
+  letter-spacing: 0.12em;
+  font-size: 11px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 4px;
+  margin-top: 6px;
+}
+/* Brief highlight when Settings is deep-linked to a section (e.g. a stage routing here to
+   install a missing tool), so the user lands exactly where the action is. */
+.form-section.settings-focus { animation: settings-focus-pulse 1.5s ease-out; border-radius: 4px; }
+@keyframes settings-focus-pulse {
+  0%, 30% { background: var(--accent); color: #fff; box-shadow: 0 0 0 4px var(--accent); }
+  100% { background: transparent; box-shadow: 0 0 0 0 transparent; }
+}
+/* A stage whose tool is missing: the "set up in Settings" affordance stacks the note + button. */
+.rt-tool-setup { flex-direction: column; align-items: stretch; gap: 6px; }
+
+.form-row {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.form-row .form-hint {
+  grid-column: 2 / -1;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.form-label {
+  font-size: 12px;
+}
+
+.form-label-info { display: inline-flex; align-items: center; gap: 5px; }
+
+.info-btn {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.info-btn:hover, .info-btn:focus-visible { opacity: 1; color: var(--fg); }
+
+.info-popover {
+  position: fixed;
+  z-index: 210;   /* above modal-window (100) */
+  max-width: min(280px, 80vw);
+  padding: 9px 11px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.22);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.form-range {
+  display: grid;
+  grid-template-columns: 1fr 44px;
+  gap: 8px;
+  align-items: center;
+}
+
+.form-range input[type="range"] {
+  width: 100%;
+}
+
+.form-range output {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  font-size: 12px;
+}
+
+.form-input,
+.form select {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  padding: 6px 8px;
+  font: inherit;
+  min-width: 0;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* Export modal: a preview of what's being rendered, on a checker so transparency reads. */
+.export-preview {
+  display: flex; align-items: center; justify-content: center;
+  max-height: 220px; padding: 8px; margin-bottom: 8px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background-color: #fff;
+  background-image:
+    linear-gradient(45deg, #e8e8ec 25%, transparent 25%), linear-gradient(-45deg, #e8e8ec 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #e8e8ec 75%), linear-gradient(-45deg, transparent 75%, #e8e8ec 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+.export-preview img { max-width: 100%; max-height: 204px; object-fit: contain; display: block; }
+
+.about-block { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+.about-name { font-size: 14px; color: var(--fg); font-weight: 600; }
+.about-ver { color: var(--muted); font-weight: 400; font-size: 12px; }
+
+.debug-diag {
+  margin: 0; padding: 8px 10px; background: var(--surface); border: 1px solid var(--line);
+  color: var(--fg); font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 4px 12px;
+  font-size: 12px;
+}
+
+.info-key {
+  color: var(--muted);
+}
+
+.info-val {
+  word-break: break-all;
+}
+
+/* ---- Image Info panel: a preview header + the file actions that used to crowd
+   the gallery thumbnail (copy name / path / reveal / open) + the primary Load. ---- */
+.info-modal { gap: 14px; }
+/* Info lives in a (narrower) dock panel now — stack the header + tighten the grid. */
+.rail-section.info .info-head { flex-direction: column; align-items: stretch; }
+.rail-section.info .info-preview { width: 100%; height: 132px; }
+.rail-section.info .info-grid { grid-template-columns: 88px minmax(0, 1fr); }
+.rail-section.info .info-actions { gap: 5px; }
+.info-head { display: flex; gap: 14px; align-items: flex-start; }
+.info-preview {
+  flex: 0 0 auto; width: 112px; height: 112px; border: 1px solid var(--hair);
+  background: var(--surface); display: grid; place-items: center; overflow: hidden;
+}
+.info-preview img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+.info-preview-proj { font-size: 56px; color: var(--muted); }
+/* canvas highlights while a library cell is dragged over it */
+.lib-drop-over { outline: 2px dashed var(--hl-drop); outline-offset: -6px; }
+.info-headmeta { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.info-name { font-weight: 600; font-size: 14px; word-break: break-all; line-height: 1.25; }
+.info-sub { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* A standard icon chin: one uniform row of bordered tool-buttons (same family as
+   the arrange / viewport toolbars), wrapping cleanly on a narrow panel instead of
+   the old ragged mix of wide text buttons. Each action is icon-only with a title. */
+.info-actions { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-top: 4px; }
+/* The emphasised action (Load into canvas / Open project) reads as a SOLID ink
+   fill — same 30px footprint as its peers, just filled; hover inverts. */
+.info-actions .info-primary { border-color: var(--ink); background: var(--ink); color: var(--on-ink); }
+.info-actions .info-primary:hover:not(:disabled) { background: var(--bg); color: var(--ink); border-color: var(--ink); }
+/* The raster/vector live-preview Keep/Revert row keeps its filled primary CTA. */
+.rt-actions .primary-button { border-color: var(--ink); background: var(--ink); color: var(--on-ink); font-weight: 600; }
+.rt-actions .primary-button:hover { filter: none; background: var(--bg); color: var(--ink); }
+/* Delete is pushed to the trailing edge — muted until hover, loud once armed
+   (first click arms → ‼, second within the open panel confirms). */
+.info-actions .danger-button { margin-left: auto; color: #b42318; }
+.info-actions .danger-button:hover:not(:disabled) { background: #b42318; color: #fff; border-color: #b42318; }
+.info-actions .danger-button.danger-armed { background: #b42318; color: #fff; border-color: #b42318; font-weight: 700; }
+
+/* Name + Path are click-to-copy (the explicit Copy buttons are gone). */
+.info-copy { border: 0; background: none; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: copy; word-break: break-all; }
+.info-copy:hover { color: var(--hl-hover); }
+.info-name.info-copy { font-size: 14px; font-weight: 600; line-height: 1.25; }
+
+/* Floating in-app prompt (replaces window.prompt for renames / save-as). */
+.hv-float-input { z-index: 1200; min-width: 230px; max-width: 280px; border: 1px solid var(--ink); background: var(--bg); box-shadow: 0 3px 12px rgba(0, 0, 0, 0.3); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.hv-float-label { font-size: 11px; color: var(--muted); letter-spacing: 0.02em; }
+.hv-float-input input { border: 1px solid var(--hair); background: var(--bg); color: var(--fg); padding: 5px 8px; font: inherit; font-size: 13px; }
+.hv-float-input input:focus { outline: none; border-color: var(--ink); }
+
+/* Live text editor overlay (the text tool). The WRAPPER is a 0×0 anchor at the viewport
+   origin carrying the stage's screen CTM as a CSS matrix, so the inner editable can use
+   plain local user-units and still land pixel-exact under zoom/pan/rotate. pointer-events
+   pass through the wrapper (only the text box itself is interactive) so a click on bare
+   canvas commits + starts the next action. The matching <text> is hidden while editing. */
+.hv-text-overlay-wrap { position: fixed; left: 0; top: 0; z-index: 1200; transform-origin: 0 0; pointer-events: none; }
+.hv-text-overlay {
+  position: absolute; pointer-events: auto; display: inline-block;
+  white-space: pre; outline: none; border: 0; margin: 0; padding: 0;
+  background: transparent; caret-color: currentColor; cursor: text;
+  min-width: 1px; min-height: 1em;
+}
+text.hv-text-editing { visibility: hidden; }
+/* Rich text runs: a small Bold/Italic/Color bar that appears above a real (non-collapsed)
+   selection inside the overlay. Appended straight to <body> (a sibling of hv-text-overlay-wrap,
+   never a child of it) so its position:fixed left/top — computed from the selection's own
+   viewport rect — isn't re-interpreted through the wrap's screen-CTM transform. */
+.hv-text-toolbar {
+  position: fixed; z-index: 1201; transform: translate(-50%, -100%);
+  display: flex; align-items: center; gap: 2px; padding: 3px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--r);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.22);
+}
+.hv-text-tb-btn {
+  min-width: 22px; height: 22px; padding: 0 5px; border: 1px solid transparent; border-radius: var(--r);
+  background: transparent; color: var(--fg); font: 700 12px/1 inherit; cursor: pointer;
+}
+.hv-text-tb-btn:nth-child(2) { font-style: italic; }
+.hv-text-tb-btn:hover { border-color: var(--line); }
+.hv-text-tb-btn.on { background: var(--fg); color: var(--bg); }
+.hv-text-tb-color { width: 20px; height: 20px; padding: 0; border: 1px solid var(--line); border-radius: var(--r); background: none; cursor: pointer; }
+/* The drag-to-create rubber-band for an AREA text box (lives in the overlay layer). */
+.hv-textbox-preview { fill: none; stroke: var(--hl-edit); stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+/* Threaded text (Epic P): a dashed connector + in/out port dots between linked boxes,
+   shown only while one end is selected (overlay chrome, never in saved output). */
+.hv-thread-link { fill: none; stroke: var(--hl-edit); stroke-width: 1.5; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+.hv-thread-port { stroke: var(--hl-edit); stroke-width: 1.5; vector-effect: non-scaling-stroke; pointer-events: none; }
+.hv-thread-port-out { fill: var(--hl-edit); }
+.hv-thread-port-in { fill: #fff; }
+/* Text inspector's "Thread" row: chain-state note + an inline Unthread button (not the
+   full-width .insp-action a standalone action button uses). */
+.insp-thread { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.insp-thread .insp-note { flex: 1 1 auto; }
+.insp-thread .insp-action { width: auto; flex: 0 0 auto; padding: 4px 8px; font-size: 11px; }
+
+/* Font picker: the Text inspector's Font row is a button (current family, shown in its own
+   face) that opens a searchable Google-Fonts browser popover. */
+.font-pick { width: 100%; text-align: left; padding: 5px 8px; border: 1px solid var(--hair); background: var(--bg); color: var(--fg); font: inherit; font-size: 13px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.font-pick:hover { border-color: var(--ink); }
+.insp-action { width: 100%; padding: 5px 8px; border: 1px solid var(--hair); background: var(--bg); color: var(--fg); font: inherit; font-size: 12px; cursor: pointer; }
+.insp-action:hover { border-color: var(--ink); }
+/* "Actions ▾" — the object-commands menu trigger at the top of the Properties panel. */
+.insp-actions-btn { width: 100%; padding: 6px 8px; margin-bottom: 14px; border: 1px solid var(--hair); border-radius: var(--r); background: var(--bg); color: var(--fg); font: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; cursor: pointer; }
+.insp-actions-btn:hover { border-color: var(--ink); background: var(--panel); }
+
+.font-browser { position: fixed; z-index: 1300; width: 304px; max-height: 384px; display: flex; flex-direction: column;
+  border: 1px solid var(--ink); background: var(--bg); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.28); }
+.font-search { margin: 8px 8px 6px; padding: 6px 8px; border: 1px solid var(--hair); background: var(--bg); color: var(--fg); font: inherit; font-size: 13px; }
+.font-search:focus { outline: none; border-color: var(--ink); }
+.font-srcbar { display: flex; gap: 4px; padding: 0 8px 8px; flex-wrap: wrap; border-bottom: 1px solid var(--hair); }
+.font-chip { padding: 3px 9px; border: 1px solid var(--hair); background: var(--bg); color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; border-radius: 999px; }
+.font-chip:hover { border-color: var(--ink); color: var(--fg); }
+.font-chip.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.font-row-src { font-size: 9px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); flex: 0 0 auto; border: 1px solid var(--hair); border-radius: 3px; padding: 1px 5px; }
+.font-row.active .font-row-src { color: rgba(255, 255, 255, 0.85); border-color: rgba(255, 255, 255, 0.4); }
+.font-results { overflow-y: auto; padding: 0 4px 6px; }
+.font-sec { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 6px 8px 2px; position: sticky; top: 0; background: var(--bg); }
+.font-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; width: 100%; text-align: left; padding: 6px 8px; border: 0; background: transparent; color: var(--fg); font: inherit; font-size: 15px; cursor: pointer; border-radius: 3px; }
+.font-row:hover { background: var(--hover); }
+.font-row.active { background: var(--hl-on); color: var(--on-ink); }
+.font-row.loading { opacity: 0.5; cursor: progress; }
+.font-row.err { color: #c0392b; }
+.font-row-cat { font-size: 10px; color: var(--muted); flex: 0 0 auto; }
+.font-row.active .font-row-cat { color: rgba(255, 255, 255, 0.8); }
+.font-empty { padding: 12px 8px; color: var(--muted); font-size: 12px; }
+
+/* Floating tag-style rename editor (replaces window.prompt). */
+.hv-rename-pop {
+  z-index: 1200; min-width: 150px; max-width: 220px;
+  border: 1px solid var(--ink); background: var(--bg); color: var(--fg);
+  padding: 4px 8px; font: inherit; font-size: 13px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.28);
+}
+
+/* Colour recents are a standard chin — identical treatment to the Object panel's
+   align chin (.insp-foot): ink top-border, 7px 10px, flush + full-width. margin-top:
+   auto pins it to the bottom; the negative margins bleed past the embedded picker's
+   8px body padding so the border spans edge-to-edge and the chin sits flush. */
+.cp-chin { margin-top: auto; border-top: 1px solid var(--ink); padding: 7px 10px; }
+/* Embedded (docked Colour panel): margin-top:auto (via the `auto` top in the shorthand)
+   already pins the recents chin to the panel's bottom when it's short — the cp-window is a
+   flex column. We deliberately do NOT position:sticky it: when the panel overflows and
+   scrolls, a sticky bottom strip rides up and covers the .cp-actions row (None/OK/Cancel)
+   sitting just above it, making those buttons unclickable. In-flow keeps recents below the
+   actions, so both stay reachable. Negative margins bleed past the 8px body padding so the
+   border spans edge-to-edge; opaque bg keeps it clean. */
+.cp-embedded .cp-chin { margin: auto -8px -8px; background: var(--bg); }
+
+/* Keyboard-shortcuts modal: section headers span the grid; key column auto-fits. */
+.shortcut-grid { grid-template-columns: max-content minmax(0, 1fr); align-items: baseline; }
+.shortcut-grid .info-key { white-space: nowrap; color: var(--fg); }
+.shortcut-grid .info-val { word-break: normal; }
+
+/* Highlight row in Settings: a curated shelf, then a well for anything else. */
+.hl-pick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.hl-swatches { display: flex; align-items: center; gap: 3px; }
+/* 22px, not the 26px field height: eight swatches plus the custom well have to sit on ONE line in a
+   settings column, and at 26px the well wrapped underneath and read as an accident. */
+.hl-sw {
+  width: 22px; height: 22px; padding: 0;
+  border: 1px solid var(--hair); border-radius: var(--r);
+  cursor: pointer; position: relative;
+}
+/* The way back. A diagonal through the theme's own paper reads as "no override" without needing a
+   word for it, and it stays legible on black as readily as on white. */
+.hl-sw-default {
+  background: var(--bg);
+  background-image: linear-gradient(to top right, transparent 45%, var(--ink) 46%, var(--ink) 54%, transparent 55%);
+}
+/* The chosen one gets a ring OUTSIDE its own edge — an inset ring on a dark swatch is invisible,
+   and this control is nothing but dark swatches half the time. */
+.hl-sw.on { outline: 2px solid var(--ink); outline-offset: 2px; }
+.hl-pick input[type="color"] {
+  width: 34px; height: 22px; padding: 0;
+  border: 1px solid var(--hair); background: var(--bg); cursor: pointer;
+}
+
+/* ---- Command palette: type what you want, in the words you'd use ---- */
+.palette-list { display: flex; flex-direction: column; }
+.palette-row {
+  display: grid; grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
+  align-items: baseline; gap: 12px; width: 100%; text-align: left;
+  padding: 8px 10px; border: 0; border-bottom: 1px solid var(--line);
+  background: transparent; color: var(--fg); font: inherit; cursor: pointer;
+}
+.palette-row:last-child { border-bottom: 0; }
+.palette-row.on { background: var(--hl-on); color: var(--on-ink); }
+.palette-label { font-weight: 600; font-size: 13px; }
+.palette-why { font-size: 12px; color: var(--muted); min-width: 0; }
+/* Not rgba(255,255,255,.85). The selected row's ground is --hl-on, which the inverted theme paints
+   WHITE — so hardcoded white text on it scored a contrast ratio of 1.00, i.e. perfectly invisible.
+   The same mistake as the 39 rules the --on-ink token was introduced to fix, made again, by me,
+   three commits later. Knock it out of the ink like everything else. */
+.palette-row.on .palette-why { color: color-mix(in srgb, var(--on-ink) 85%, transparent); }
+/* An unavailable command is dimmed but NOT hidden. A palette that showed only what you can already
+   do would only ever tell you what you already know — the whole value of searching "hole" with
+   nothing selected is being told that Subtract exists, and what it wants. */
+.palette-row.unavailable .palette-label { color: var(--muted); font-weight: 500; }
+.palette-row.unavailable.on { background: var(--muted); }
+/* A phone opens this with a thumb, so the rows have to be thumb-sized, and the reason wraps under
+   the name rather than fighting it for a 390px row. */
+@media (max-width: 620px) {
+  .palette-row { grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 10px 12px; }
+  .palette-label { font-size: 14px; }
+}
+.shortcut-section {
+  grid-column: 1 / -1;
+  margin-top: 12px;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 3px;
+}
+.shortcut-section:first-child { margin-top: 0; }
+
+.panel-focused {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* status-bar (ready bar) tool cluster: undo / redo / help / collapse — one
+   consistent square-box object, same size as the toolstrip & viewport buttons. */
+.status-tools { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.bar-sep { width: 1px; align-self: stretch; margin: 4px 2px; background: var(--line); }
+.bar-btn {
+  position: relative; box-sizing: border-box; width: 30px; height: 30px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+  font: inherit; font-size: 15px; line-height: 1; cursor: pointer; display: grid; place-items: center;
+}
+.bar-btn:hover:not(:disabled) { background: var(--hl-hover); color: var(--on-ink); border-color: var(--hl-hover); }
+.bar-btn:disabled { opacity: 0.35; cursor: default; }
+.bar-btn[data-key]::after {
+  content: attr(data-key);
+  position: absolute; right: 1px; bottom: 0;
+  font-size: 8px; line-height: 1; font-weight: 600;
+  color: var(--muted); pointer-events: none;
+}
+.bar-btn:hover:not(:disabled)[data-key]::after { color: rgba(255, 255, 255, 0.8); }
+.bar-btn.bar-text { width: auto; padding: 0 10px; font-size: 12px; }
+.bar-btn.active { background: var(--hl-on); color: var(--on-ink); border-color: var(--hl-on); }
+
+/* ---- Customize-layout mode: drag toolbar tiles between the picture-frame bars ---- */
+.app.editor.customizing .toolstrip,
+.app.editor.customizing .stage-toolbar,
+.app.editor.customizing .actionbar,
+.app.editor.customizing .viewport-controls { outline: 1px dashed var(--hl-drop); outline-offset: -1px; background: color-mix(in srgb, var(--hl-drop) 6%, var(--bg)); }
+/* the bottom bar's viewport cluster is centered inside a wider .panel-foot, so tint the
+   whole foot too — otherwise only the button group turns blue and the bar reads white. */
+.app.editor.customizing .panel-foot { background: color-mix(in srgb, var(--hl-drop) 6%, var(--bg)); }
+/* the Layers artboard chin reads as part of the customizable frame too */
+.app.editor.customizing .layers-foot { outline: 1px dashed var(--hl-drop); outline-offset: -1px; background: color-mix(in srgb, var(--hl-drop) 6%, var(--bg)); }
+/* ---- "Customize bars" picker (src/ui/layout-picker.js) ---------------------------------------
+   A list, not a drag surface: on a phone the bars sit at opposite ends of the screen and the
+   action bar is inside the sheet, so dragging between them is hostile. Rows are touch-sized. */
+.picker-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 4px; border-bottom: 1px solid var(--line);
+}
+.picker-row input[type="checkbox"] { flex: 0 0 auto; width: 20px; height: 20px; }
+.picker-glyph {
+  flex: 0 0 auto; width: 26px; height: 26px; display: grid; place-items: center;
+  border: 1px solid var(--line); background: var(--bg); font-size: 14px; line-height: 1;
+}
+/* The name must not be the thing that gives way — a row of "Selec…", "Recta…", "Curv…" is useless.
+   It gets a real floor, and the controls stay compact. */
+.picker-name { flex: 1 1 auto; min-width: 7.5em; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-nudge { flex: 0 0 auto; min-width: 30px; padding: 4px 5px; }
+/* The "move to another bar" select, wearing a ⇄. Inside its own section it always reads back that
+   section's own name, so as a wide text control it was pure noise on every row — while still being
+   the only way to move a tile between bars. So: a 40px target showing ⇄, with the real select
+   stretched invisibly over it. Tapping opens the native picker, with the bar names spelled out in
+   full. (Not `visibility:hidden` or `display:none` — those would take the tap target with them.) */
+.picker-moveto {
+  position: relative; flex: 0 0 auto;
+  width: 40px; height: 34px; display: grid; place-items: center;
+  border: 1px solid var(--line); background: var(--bg);
+  font-size: 14px; line-height: 1; cursor: pointer;
+}
+.picker-moveto::before { content: "⇄"; pointer-events: none; }
+.picker-move {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; cursor: pointer; -webkit-appearance: none; appearance: none;
+}
+/* Phones: ONE line per row. It used to wrap to two — the redundant bar-select forced the break — so
+   thirteen tools became a mile of scrolling in a sheet you were already scrolling. Halving the row
+   height is most of what "hard to navigate" meant. */
+@media (max-width: 460px) {
+  .picker-row { flex-wrap: nowrap; gap: 5px; padding: 4px 2px; }
+  .picker-row input[type="checkbox"] { width: 22px; height: 22px; }
+  .picker-glyph { width: 26px; height: 26px; font-size: 13px; }
+  .picker-name { flex: 1 1 auto; min-width: 0; font-size: 13px; }   /* the name gives way LAST, but it may give way */
+  .picker-nudge { min-width: 32px; height: 34px; padding: 0; font-size: 14px; }
+  .picker-moveto { width: 36px; }
+}
+.picker-over { margin-left: 8px; color: var(--accent); font-weight: 600; }
+.picker-pin { filter: grayscale(1); opacity: 0.5; }
+.picker-pin.on { filter: none; opacity: 1; background: var(--surface); border-color: var(--ink); }
+.picker-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 0 4px; }
+.picker-foot .primary { margin-left: auto; background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+/* (the phone sheet's own way in — .sheet-customize — is a tab now; it's styled with the strip) */
+
+/* A tile the user has switched off. The node STAYS in the DOM (so its order is still captured, and
+   every id-wired handler survives) — only its chrome goes away. Hiding a tool trims the BAR, not
+   the tool: its keyboard shortcut keeps working. !important because the phone media block sets an
+   explicit display on bar children, which would otherwise win. */
+.tool-button.layout-hidden { display: none !important; }
+/* The ENGINE says this action isn't possible right now. A different thing entirely from
+   .layout-hidden (the USER switched it off) — different class, different owner, and the engine never
+   persists. Plain display:none, no !important, so both .layout-hidden and .customizing win over it. */
+.tool-button.act-off, .tool-sep.act-off, .tool-vsep.act-off, .vp-sep.act-off { display: none; }
+/* an anchored tile: the engine won't reorder it or hide it, whatever you select */
+.tool-button.layout-pinned::before {
+  content: ""; position: absolute; left: 2px; top: 2px;
+  width: 3px; height: 3px; border-radius: 50%; background: var(--accent); pointer-events: none;
+}
+/* Freeze the track. The bars' EXTENT changing is the real jank — it re-measures the grid and the
+   canvas lurches. Give them a floor sized to the empty bar so the track never moves. */
+.editor-grid > .actionbar { min-height: 34px; }
+.app.has-selection .stage-wrap > .stage-toolbar { min-height: 34px; }
+/* ...but while you're customizing you must be able to SEE what you switched off, or you could never
+   switch it back on from the bar itself. Show it, ghosted. */
+.app.editor.customizing .tool-button.layout-hidden { display: grid !important; opacity: 0.32; outline: 1px dashed var(--muted); outline-offset: -1px; }
+
+/* tiles become draggable handles; their normal click is suppressed while customizing */
+.app.editor.customizing .tool-button { cursor: grab; }
+.app.editor.customizing .tool-button:active { cursor: grabbing; }
+.app.editor.customizing .tool-button.dragging { opacity: 0.4; outline: 1px solid var(--hl-drop); }
+/* The drag runs on pointer events now (HTML5 drag never fires from a finger). Two consequences:
+   - touch-action:none, or a drag along the phone's horizontally-scrolling tool strip would just be
+     read as a scroll and the tile would never move. Only the TILES claim the gesture; the bar's own
+     background still scrolls normally.
+   - a floating CLONE follows the pointer (.hv-drag-ghost below); the tile itself stays put as a
+     dimmed placeholder marking the live drop position, so it must not swallow its own hit-tests. */
+.app.editor.customizing .tool-button,
+.app.editor.customizing .tool-sep,
+.app.editor.customizing .tool-vsep,
+.app.editor.customizing .vp-sep { touch-action: none; }
+.app.editor.customizing .tool-button.dragging { pointer-events: none; position: relative; z-index: 3; }
+/* pointer-drag.js's floating ghost (see makeGhost()): fixed off the viewport and appended to
+   <body>, so it reads as genuinely lifted off the surface — and, load-bearing, so no ancestor's
+   scrollable/clipped rail (toolstrip, a panel body, the layer list) can clip it once the drag
+   crosses that ancestor's own edge, which is what made a dragged tile appear "stuck" before. */
+.hv-drag-ghost { box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35); opacity: 0.96; }
+/* a bar refusing the drop (a panel header already at its tile cap) — replaces DnD's dropEffect */
+.app.editor.customizing .no-drop { outline: 1px dashed var(--danger) !important; cursor: no-drop; }
+/* disabled tiles stay draggable in customize mode (you're arranging, not using them) */
+.app.editor.customizing .tool-button:disabled { opacity: 1; cursor: grab; }
+/* dividers become visible, grabbable chips while customizing (drag to move,
+   right-click a bar to add one / a divider to remove it) */
+.app.editor.customizing .tool-sep,
+.app.editor.customizing .tool-vsep,
+.app.editor.customizing .vp-sep { background: var(--hl-drop); opacity: 0.55; cursor: grab; border-radius: 2px; }
+.app.editor.customizing .tool-sep { height: 4px; margin: 2px 4px; }
+.app.editor.customizing .tool-vsep,
+.app.editor.customizing .vp-sep { width: 4px; margin: 3px 2px; }
+.app.editor.customizing .tool-sep.dragging,
+.app.editor.customizing .tool-vsep.dragging,
+.app.editor.customizing .vp-sep.dragging { opacity: 1; }
+
+@media (max-width: 700px) {
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+  .form-row .form-hint {
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 1100px) {
+  .main-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: minmax(160px, 220px) minmax(0, 1fr);
+  }
+
+  .library {
+    grid-column: 1 / -1;
+  }
+
+}
+
+@media (max-width: 700px) {
+  .main-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(160px, 200px) minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .library {
+    grid-column: auto;
+  }
+}
+
+/* ===================== App-window mode (standalone / WCO) =====================
+   Active only when launched via launch.sh as a Chromium app window (the JS adds
+   `.app-window`, and `.wco` when the Window-Controls-Overlay is live). Window
+   min/max/close are left to the native window manager — no custom buttons. Gated
+   so the normal in-browser layout is completely unaffected.
+
+   In app-window mode the header doubles as the OS titlebar: empty header areas
+   drag the window; interactive controls opt out. */
+.app-window .topbar {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+.app-window .topbar button,
+.app-window .topbar a,
+.app-window .topbar select,
+.app-window .topbar input,
+.app-window .topbar .menu,
+.app-window .topbar .menu-list {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* When the Window-Controls-Overlay is active, the native min/max/close buttons
+   sit in a reserved corner; `--wco-*-inset` (set from JS via getTitlebarAreaRect)
+   keep our header content clear of them. */
+.app-window.wco .topbar {
+  padding-left: calc(12px + var(--wco-left-inset, 0px));
+  padding-right: calc(12px + var(--wco-right-inset, 0px));
+}
+
+/* ============================================================================
+   MOBILE / TOUCH — phone-first reflow of the editor shell.
+   Triggered on narrow windows (≤720px) OR any coarse-pointer device up to a
+   tablet (≤1024px). Layout + input only — NOT a capability change (the cloud
+   vs desktop split stays platform.js). The 5-column picture-frame grid folds
+   into: canvas (fills) · object-action strip · tool strip, all stacked; the
+   right dock (History/Layers/Properties/Colour) becomes a slide-up bottom sheet
+   toggled by a floating Panels button. See src/ui/viewport.js bindViewportTouch
+   for the matching pinch-zoom / two-finger-pan gesture.
+   ============================================================================ */
+.mobile-fab { display: none; }
+.mobile-scrim { display: none; }
+
+/* Any touch device — including large tablets (iPad landscape ≥1025px) that keep the roomy
+   desktop rails — gets finger-friendlier toolbar targets. The width-scoped reflow blocks below
+   are more specific, so they still win where they apply (phones/portrait tablets). */
+@media (pointer: coarse) {
+  .toolstrip .tool-button,
+  .actionbar .tool-button { width: 38px; height: 38px; font-size: 16px; }
+  .toolstrip .tool-button.tool-primary { width: 40px; height: 40px; font-size: 18px; }
+  /* You can't install a local desktop app from a phone/tablet — the CTA is desktop-only. */
+  .cloud .get-desktop { display: none; }
+
+  /* Pin the page. `overflow: hidden` is not enough on iOS: Safari will still rubber-band the body and
+     use a stray drag to collapse/expand its own toolbar, and a 100dvh app RESIZES when it does — so
+     the whole UI heaves under your finger. A fixed body has nothing to hand the gesture to. */
+  body { position: fixed; inset: 0; }
+
+  /* A drag on a BAR must never become a drag on the page. These strips scroll horizontally, so allow
+     exactly that and nothing else: a vertical swipe on a toolbar was being handed straight to iOS as
+     a page scroll. This is the other half of the same bug — touch-action says which gestures the
+     browser may take, overscroll-behavior says where they may go. */
+  .mobilebar,
+  .editor-grid > .toolstrip,
+  .editor-grid > .actionbar,
+  .phone-ctxrow .stage-toolbar,
+  .stage-wrap .panel-foot,
+  .sheet-tabs { touch-action: pan-x; overscroll-behavior: contain; }
+  /* ...and the vertical scrollers scroll themselves, never the page behind them. */
+  .editor-grid > .rightdock,
+  .rightdock .section-body,
+  .rightdock .sheet-active,
+  .layers-list,
+  .fp-body { touch-action: pan-y; overscroll-behavior: contain; }
+}
+
+@media (max-width: 720px), (pointer: coarse) and (max-width: 1024px) {
+  /* Don't show the shell until its furniture has landed. The bars are MOVED into place by JS, so the
+     first paint is the authored DESKTOP layout — action bar across the top, an extra strip under the
+     canvas — which then snaps. One honest paint beats two, the first of which is a lie. Desktop needs
+     no composition and so never hides. (layout.js drops `booting`; index.html carries a timeout
+     backstop so a boot failure can never leave a blank screen.) */
+  .app.booting { visibility: hidden; }
+
+  /* reclaim every pixel: drop the 10px frame + gap, and hug the safe-area (notch/home indicator)
+     instead. The bottom inset is applied to whatever bar sits last (below). */
+  .app.editor {
+    gap: 0;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  }
+  /* This used to be `display: none`, on the reasoning that a status strip ("Ready.", "Saved.") is a
+     whole band a phone can't spare. That misread what the band IS. It is the TEACHING line: the app
+     writes the current tool's purpose into it in plain English on every tool change, and it is the
+     only plain English this app puts on screen anywhere. Hiding it meant a phone COMPUTED the
+     sentence ("Rectangle — drag on the canvas") and rendered it into a hidden element, on the one
+     platform with no hover, no tooltips and no keyboard shortcuts — the platform that needed the
+     words most. It also took the ? (help) button down with it, to a 0x0 rect.
+     So the band is spent, deliberately, and kept cheap: one line, 30px, at the foot where the
+     desktop puts it too. The FAB offsets below account for it via --strip-h. */
+  :root { --strip-h: 44px; --ctxrow-h: 58px; }   /* --ctxrow-h: the contextual bar's own height (44px tool-button + 7px top/bottom padding) — quoted to the FAB below so it clears it too, same idea as --strip-h */
+  .app.editor > .status-bar {
+    min-height: var(--strip-h);
+    gap: 8px;
+    padding: 4px 10px calc(env(safe-area-inset-bottom)) 10px;   /* now the last band → clear the home indicator */
+    align-items: center;
+    /* The base rule wraps. Here that is fatal: the sentence asks for its full content width, blows
+       the row, and the ? button drops to a SECOND line — a 71px strip instead of 44. One row, and
+       let the sentence shrink into it (see `flex: 1 1 0` below). */
+    flex-wrap: nowrap;
+  }
+  .app.editor > .status-bar #status-text {
+    /* Three things, and all three are load-bearing. `flex: 1 1 auto` + `min-width: 0`: without them
+       the text sizes to its own content in this flex row and shoves the ? button clean off the right
+       edge of the phone. `white-space: normal`: the desktop rule sets `nowrap`, which makes wrapping
+       impossible, so a hint could only ever be one clipped line. And the 2-line clamp caps it — the
+       band's height is quoted to the FAB as --strip-h, so a strip free to grow to four lines would
+       silently put the FAB on top of the tools it is supposed to float above. Two lines at 390px is
+       ~110 characters, which is the real budget every touch hint is written to. */
+    flex: 1 1 0; min-width: 0;   /* basis 0, not auto: auto asks for the content width and wraps the row */
+    white-space: normal;
+    font-size: 12px; line-height: 1.3;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  /* ◫ collapses the side rails. A phone HAS no side rails — the dock is a sheet — so the button is
+     meaningless here and the 30px is better spent on the sentence. ? stays: it is the way in to help,
+     and on a phone it was previously unreachable at any size. */
+  .app.editor > .status-bar #rail-toggle { display: none; }
+  .app.editor > .status-bar .bar-btn { width: 26px; height: 26px; font-size: 13px; }
+  /* The Arrange strip becomes the CONTEXTUAL bar: hidden while you draw, and shown at the BOTTOM
+     of the screen — right above .status-bar, thumb-reachable — the moment something is selected.
+     formfactor.js relocates it into a fresh full-width .phone-ctxrow wrapper (a sibling of
+     .editor-grid itself, next to .status-bar) rather than leaving it nested in .stage-wrap —
+     nested there, it's confined to the middle rail column, too narrow to keep even the capped 7
+     tiles reachable without scrolling. It deliberately does NOT stack under the always-visible
+     quick bar at the top: a lone strip there plus this one read as two competing toolbars fighting
+     over the same 44px band the instant something's selected, and the bottom edge — where a thumb
+     already rests — sat empty the whole time. It carries the ops you can only want with a
+     selection — arrange, rename, duplicate and, crucially, DELETE, which this stylesheet used to
+     display:none outright, leaving no way at all to delete an object on a phone. */
+  .phone-ctxrow > .stage-toolbar { display: none; }
+  .app.has-selection .phone-ctxrow > .stage-toolbar {
+    display: flex;
+    /* nowrap or it stacks into two rows and eats ~200px of canvas — it must scroll, not wrap.
+       flex-start is load-bearing too: the desktop rule centres this bar, and centred flex content
+       that overflows spills off the LEFT edge, where scrolling cannot reach it — Duplicate was
+       sitting at x=-50, permanently unreachable. */
+    flex-direction: row; flex-wrap: nowrap; justify-content: flex-start; align-items: center; gap: 8px;
+    padding: 7px 10px; margin: 0;
+    border-width: 1px 0 0 0; border-top: 1px solid var(--line);   /* it's below the canvas now, above the status bar (which borders its own top edge too, but that seam is its, not ours) */
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .app.has-selection .phone-ctxrow > .stage-toolbar::-webkit-scrollbar { display: none; }
+  .app.has-selection .phone-ctxrow > .stage-toolbar .tool-button { width: 44px; height: 44px; font-size: 19px; flex: 0 0 auto; }
+  .app.has-selection .phone-ctxrow > .stage-toolbar .tool-vsep { width: 1px; height: 26px; margin: 0 3px; align-self: center; flex: 0 0 auto; }
+
+  /* --- the always-on quick bar: undo/redo + canvas control, directly under the topbar --- */
+  .mobilebar {
+    display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 8px;
+    padding: 6px 10px; min-width: 0;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .mobilebar::-webkit-scrollbar { display: none; }
+  /* app.js only fills this bar below 620px, so in LANDSCAPE (which also matches the coarse-pointer
+     branch of this query) it stays empty — and an empty flex box still claimed a 53px grid column,
+     stealing the landscape tool rail's slot. Collapse it whenever it holds nothing. */
+  .mobilebar:empty { display: none; }
+  .mobilebar .tool-button { width: 42px; height: 42px; font-size: 18px; flex: 0 0 auto; }
+  .mobilebar .tool-sep { width: 1px; height: 24px; margin: 0 3px; align-self: center; flex: 0 0 auto; background: var(--line); }
+
+  /* --- rails either side of the canvas, mirroring desktop's own spatial language ---
+     Portrait has the OPPOSITE resource profile from short landscape: plenty of HEIGHT, little
+     WIDTH. A horizontal strip (full viewport width, ~44-60px tall) spends the abundant axis and
+     taxes the scarce one; a vertical rail (viewport height, ~40-54px wide) does the reverse — so
+     tools and object-actions become rails here too, the same 3-column shape the landscape shell
+     below already proved out, just narrower-and-taller instead of shorter-and-wider. This also
+     means .actionbar no longer needs the Panels-sheet detour: after formfactor.js's `ctx` merge
+     moves every selection-dependent tile (scale/rotate/duplicate/booleans/flip) into
+     .stage-toolbar, what's left in .actionbar is just cut/copy/paste — small enough to live as
+     its own persistent rail, same as it already does in landscape below.
+     minmax(0,1fr) NOT 1fr on the middle column/last row: a bare 1fr track still resolves to its
+     widest item's min-content, and grid items default to min-width/height:auto, so a wide rail
+     or tall canvas content would blow its track past the viewport. */
+  .app.editor .editor-grid {
+    grid-template-columns: auto minmax(0, 1fr) auto !important;   /* beat docks.js's inline column track */
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .editor-grid > .leftdock { display: none !important; }
+  .editor-grid > .mobilebar  { grid-row: 1; grid-column: 1 / -1; min-width: 0; }
+  .editor-grid > .toolstrip  { grid-row: 2; grid-column: 1; min-width: 0; }
+  .editor-grid > .stage-wrap { grid-row: 2; grid-column: 2; min-width: 0; }
+  .editor-grid > .actionbar  { grid-row: 2; grid-column: 3; min-width: 0; }
+  /* .phone-ctxrow lives OUTSIDE .editor-grid now — formfactor.js parks it next to .status-bar (a
+     sibling of .editor-grid within .app.editor, not a descendant of it), so .app.editor itself
+     needs a 4th row for it: topbar / editor-grid (flexible) / ctxrow / status-bar. An empty row
+     costs nothing (an `auto` track with no content collapses to 0), so this is safe even where
+     .phone-ctxrow never gets created (landscape shares this media query but composes its
+     contextual bar onto the topbar's own row instead — see formfactor.js). See the design note
+     where .app.has-selection .phone-ctxrow > .stage-toolbar is styled above for the rest of it. */
+  .app.editor { grid-template-rows: auto minmax(0, 1fr) auto auto; }
+  .app.editor > .phone-ctxrow { min-width: 0; }
+
+  /* --- tools + object actions: vertical rails, scrolling on the Y axis (as on desktop) --- */
+  .editor-grid > .toolstrip,
+  .editor-grid > .actionbar {
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 5px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .editor-grid > .toolstrip { border-width: 0 1px 0 0; }
+  .editor-grid > .actionbar { border-width: 0 0 0 1px; }
+  .editor-grid > .toolstrip::-webkit-scrollbar,
+  .editor-grid > .actionbar::-webkit-scrollbar { display: none; }
+  /* 44px, not landscape's 40px below — a touch target minimum this stylesheet already asserts
+     elsewhere, and portrait can afford it (little width is spent per rail; height is the scarce
+     axis here, not width). */
+  .editor-grid > .toolstrip .tool-button,
+  .editor-grid > .actionbar .tool-button { width: 44px; height: 44px; font-size: 19px; flex: 0 0 auto; }
+  /* The rail scrolls vertically again now (same axis app.js registered it with — see
+     observeOverflow's [".toolstrip","y"] entry), so the desktop .tile-scroll-y fade mask just
+     works unmodified; no horizontal override needed here any more. */
+  /* The toolstrip is no longer the last band — the teaching strip sits under it now and carries the
+     home-indicator inset instead. Padding past the indicator HERE as well would double it. */
+  .editor-grid > .toolstrip { padding-bottom: 7px; }
+  .editor-grid > .toolstrip .tool-button.tool-primary { width: 48px; height: 48px; font-size: 21px; }
+  /* separators: horizontal hairlines again, now that the bars are vertical */
+  .editor-grid > .toolstrip .tool-sep,
+  .editor-grid > .actionbar .tool-sep {
+    width: 24px; height: 1px; margin: 3px 0; align-self: center; flex: 0 0 auto;
+  }
+
+  /* --- right dock → slide-up bottom sheet --- */
+  .editor-grid > .rightdock {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    width: auto; margin: 0;
+    /* dvh, not vh: vh is the TALL viewport (it ignores Safari's toolbars), so a vh-sized sheet
+       runs off the bottom of the screen on iOS. */
+    height: min(70dvh, 540px);
+    border: 1px solid var(--line); border-bottom: 0;
+    border-radius: 16px 16px 0 0;
+    transform: translateY(102%);
+    transition: transform 0.26s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 60;
+    box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.18);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .app.sheet-open .editor-grid > .rightdock { transform: translateY(0); }
+  .editor-grid > .rightdock .dock-resizer,
+  .editor-grid > .rightdock .dock-vresizer,
+  .editor-grid > .rightdock .dock-vsep { display: none; }
+  /* grab handle at the top of the sheet */
+  .editor-grid > .rightdock::before {
+    content: ""; display: block;
+    width: 42px; height: 4px; margin: 8px auto 4px;
+    border-radius: 3px; background: var(--line); flex: 0 0 auto;
+  }
+  /* the object-action bar + zoom/fit strip, reparented into the sheet (ui/formfactor.js) so the
+     bottom of the canvas keeps ONLY the tool bar. They're panes here, same as the panels. */
+  .editor-grid > .rightdock > .in-sheet {
+    display: flex; flex-flow: row wrap; align-items: center; align-content: flex-start;
+    justify-content: flex-start;
+    gap: 8px; width: auto; margin: 0; padding: 12px; overflow: visible; border: 0;
+  }
+  .editor-grid > .rightdock > .in-sheet .tool-button { width: 44px; height: 44px; font-size: 18px; flex: 0 0 auto; }
+  .editor-grid > .rightdock > .in-sheet .tool-sep,
+  .editor-grid > .rightdock > .in-sheet .vp-sep { display: none; }
+  .editor-grid > .rightdock > .panel-foot.in-sheet .viewport-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  /* --- the sheet is a TAB SURFACE: one panel, full height --- */
+  /* It was a stack of ten panels in a 480px sheet: you scrolled the sheet to find a panel, then
+     scrolled inside the panel to read it. Two scrollers, one thumb. Now a strip of tabs scrolls
+     sideways and the panel you pick owns the whole sheet. (ui/formfactor.js builds the strip; the
+     panes are the sheet's own children, moved by nobody.) */
+  .editor-grid > .rightdock.sheet-tabbed { display: flex; flex-direction: column; overflow: hidden; }
+  .editor-grid > .rightdock.sheet-tabbed::before { order: -2; }   /* the grab handle stays on top */
+  /* A pane can insert itself anywhere and still land at the head of the sheet — TAB_ORDER decides
+     rank, not DOM position. The strip scrolls; the gear does NOT (it's the only way into Customize on
+     a phone — it must never scroll out of reach). */
+  .sheet-tabbar {
+    order: -1; flex: 0 0 auto;
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; border-bottom: 1px solid var(--line);
+  }
+  .sheet-tabs {
+    flex: 1 1 auto; min-width: 0;
+    display: flex; align-items: center; gap: 6px;
+    overflow-x: auto; overflow-y: hidden;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .sheet-tabs::-webkit-scrollbar { display: none; }
+  .sheet-tab {
+    flex: 0 0 auto; height: 44px; padding: 0 15px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--muted);
+    font: inherit; font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer;
+  }
+  .sheet-tab.on { background: var(--ink); color: var(--bg); }
+  .sheet-customize {
+    flex: 0 0 auto; width: 44px; height: 44px; padding: 0;
+    border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+    display: grid; place-items: center;
+    font-size: 18px; line-height: 1; cursor: pointer;
+  }
+  .sheet-customize .brand-logo { display: block; width: 24px; height: 24px; }
+
+  .editor-grid > .rightdock.sheet-tabbed > *:not(.sheet-tabbar) { display: none; }
+  .editor-grid > .rightdock.sheet-tabbed > .rail-section.sheet-active,
+  .editor-grid > .rightdock.sheet-tabbed > .in-sheet.sheet-active { display: flex; }
+  .editor-grid > .rightdock.sheet-tabbed > .proc-auto.sheet-active { display: block; }
+  .editor-grid > .rightdock.sheet-tabbed > .sheet-active {
+    flex: 1 1 auto; min-height: 0; margin: 0; border: 0;
+    overflow-y: auto; overscroll-behavior: contain;
+  }
+  /* a panel pane: header pinned, body scrolls (the body carries a 100vh max-height for the desktop rail) */
+  .editor-grid > .rightdock.sheet-tabbed > .rail-section.sheet-active { overflow: hidden; }
+  .editor-grid > .rightdock.sheet-tabbed > .rail-section.sheet-active > .section-body {
+    flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto;
+  }
+  /* the tab IS the title — no accordion caret, and no header tap that folds the pane away */
+  .editor-grid > .rightdock.sheet-tabbed .section-head { cursor: default; }
+  .editor-grid > .rightdock.sheet-tabbed .section-head .caret { display: none; }
+
+  /* --- floating Panels toggle + dismiss scrim --- */
+  /* Tools and actions are rails now, not bottom bars, so the FAB only needs to clear the teaching
+     strip (bottom) and the actionbar rail (right) — the same offsets short-landscape already
+     uses below, for the same reason. The fill/stroke swatches move LEFT below so they don't sit
+     under it. position:fixed is viewport-relative, so it has no idea the contextual bar's own row
+     just grew the bottom stack when something's selected — .app.has-selection below lifts it the
+     extra --ctxrow-h so it never sits on top of (or under) the contextual bar's own tiles. */
+  .mobile-fab {
+    display: grid; place-items: center;
+    position: fixed; right: calc(66px + env(safe-area-inset-right)); bottom: calc(16px + var(--strip-h) + env(safe-area-inset-bottom));
+    width: 50px; height: 50px; border-radius: 50%;
+    background: var(--ink); color: var(--on-ink); border: 0;
+    font-size: 21px; line-height: 1; cursor: pointer;
+    z-index: 55; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  }
+  /* the brand mark is black ink; the FAB is a black disc — invert it or it disappears into its own button */
+  .mobile-fab .brand-logo { display: block; width: 26px; height: 26px; filter: invert(1); }
+  /* the contextual bar's own row is now above the status bar too — lift the FAB the extra
+     --ctxrow-h so it floats above BOTH bottom bands instead of overlapping the first one. */
+  .app.has-selection .mobile-fab { bottom: calc(16px + var(--strip-h) + var(--ctxrow-h) + env(safe-area-inset-bottom)); }
+  .app.sheet-open .mobile-fab { display: none; }   /* tap the scrim to dismiss */
+  .app.sheet-open .mobile-scrim { display: block; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); z-index: 58; }
+  .stage-body .tool-swatches { left: 12px; right: auto; }
+  /* the canvas's own zoom/fit/rulers strip: left-align + scroll, and reserve the right edge
+     for the FAB so no control sits under it (pinch-zoom also covers zoom/pan now). */
+  .stage-wrap .panel-foot { justify-content: flex-start; overflow-x: auto; padding-right: 72px; }
+  .stage-wrap .panel-foot::-webkit-scrollbar { display: none; }
+
+  /* --- the header row is GONE --- */
+  /* It held a logo, a ≣, and (in the cloud build) nothing else: ~50px of a 844px screen spent saying
+     the app's own name to someone who is already inside it. The logo now IS the File button, one tile
+     down in the quick bar (ui/formfactor.js moves it there), so the row has nothing left to do. */
+  .app.editor > .topbar { display: none; }
+  /* .app's rows are `auto auto 1fr auto`, assigned BY CHILD ORDER — so hiding the header slid the
+     editor grid up into an `auto` track and the app stopped filling the screen (a dead white band at
+     the bottom, with the FAB stranded on top of the tool bar). The header and the status bar are both
+     gone here; one child, one row, and it takes everything. */
+  .app.editor { grid-template-rows: minmax(0, 1fr); }
+  .mobile-chrome { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+  .mobile-chrome .panel-shelf:empty { display: none; }
+  /* the logo, wearing the File menu */
+  .menu-trigger.has-logo {
+    display: grid; place-items: center;
+    width: 42px; height: 42px; padding: 0;
+    border: 1px solid var(--line); background: var(--bg);
+  }
+  .menu-trigger.has-logo .mt-glyph { display: none; }
+  .menu-trigger.has-logo .brand-logo { display: block; width: 26px; height: 26px; }
+}
+
+/* ---- Short LANDSCAPE (phones held sideways) ----
+   A phone in landscape has ~360–430px of HEIGHT — the stacked-bars portrait layout eats all of
+   it and the canvas becomes a sliver. Vertical space is scarce but HORIZONTAL space is plentiful,
+   so fold back to side rails (tools left · canvas · actions right) — the desktop frame, touch-sized
+   — and keep the dock as a bottom sheet. Height-gated so tablets (taller) never hit this. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  /* Buttons SURROUND the canvas — the desktop's own spatial language, which a phone held sideways has
+     the width to afford. Tools down the left, actions down the right, chrome + the contextual bar
+     across the top, canvas in the middle. It used to stack the zoom strip and the contextual bar
+     UNDER the canvas, spending the one axis a 390px-tall screen hasn't got. */
+  .app.editor .editor-grid {
+    grid-template-columns: auto minmax(0, 1fr) auto !important;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  /* The teaching strip FLOATS here instead of taking a band, and the rule above is why: this shell
+     exists precisely because stacking things under the canvas spends "the one axis a 390px-tall
+     screen hasn't got". A 44px band is that same mistake wearing a better hat — it costs 11% of the
+     height, and the e2e's "keeps most of the height" guard caught me doing it.
+     Sideways there are 844px of WIDTH, so the sentence fits on one line and can simply lie along the
+     bottom edge of the canvas, over it, costing zero layout height. The bar is transparent to touch
+     so it can't steal a tap meant for the artwork; only the ? button takes one back. */
+  :root { --strip-h: 24px; }
+  .app.editor > .status-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 45;
+    min-height: var(--strip-h);
+    padding: 0 10px calc(env(safe-area-inset-bottom)) 10px;
+    border-width: 1px 0 0 0;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    pointer-events: none;
+  }
+  .app.editor > .status-bar #status-text { -webkit-line-clamp: 1; }
+  .app.editor > .status-bar .status-tools { pointer-events: auto; }
+  .editor-grid > .leftdock { display: none !important; }
+  .editor-grid > .mobilebar { grid-row: 1; grid-column: 1 / -1; min-width: 0; }
+  .editor-grid > .toolstrip { grid-row: 2; grid-column: 1; min-width: 0; }
+  .editor-grid > .stage-wrap { grid-row: 2; grid-column: 2; min-width: 0; }
+  .editor-grid > .actionbar  { grid-row: 2; grid-column: 3; min-width: 0; }
+  /* the contextual bar rides ON the top bar (formfactor.js moves the nav there) — it appears only
+     when something is selected, so it costs nothing while you draw */
+  .mobilebar > .stage-toolbar.on-topbar {
+    display: none;
+    /* nowrap or it wraps to two rows INSIDE the top bar and eats 90px of a 390px screen. It's a
+       sideways scroller here, not a wrapping bar — the adaptive engine already ranks it, so what
+       matters most is what you see first. */
+    flex: 0 1 auto; min-width: 0; flex-wrap: nowrap; gap: 5px;
+    padding: 0; margin: 0; border: 0;
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: none; touch-action: pan-x;
+  }
+  .app.has-selection .mobilebar > .stage-toolbar.on-topbar { display: flex; align-items: center; }
+  .mobilebar > .stage-toolbar.on-topbar::-webkit-scrollbar { display: none; }
+  .mobilebar > .stage-toolbar.on-topbar .tool-button { width: 40px; height: 40px; font-size: 17px; flex: 0 0 auto; }
+  .mobilebar > .stage-toolbar.on-topbar .tool-vsep { width: 1px; height: 24px; margin: 0 2px; align-self: center; flex: 0 0 auto; }
+  /* the top bar is one row, and a short screen can't spare more */
+  .editor-grid > .mobilebar { padding: 5px 8px; gap: 6px; }
+  .editor-grid > .mobilebar .tool-button { width: 40px; height: 40px; font-size: 17px; }
+  .editor-grid > .mobilebar .menu-trigger.has-logo { width: 40px; height: 40px; }
+  /* rails: vertical again, scrolling on the Y this time */
+  .editor-grid > .toolstrip,
+  .editor-grid > .actionbar {
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 5px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .editor-grid > .toolstrip { border-width: 0 1px 0 0; }
+  .editor-grid > .actionbar { border-width: 0 0 0 1px; }
+
+  /* FULL-BLEED. The safe-area inset was padding the whole GRID, so the app sat in a white picture
+     frame: the top bar's rule stopped short of both edges and a dead gutter ran down each side. In
+     landscape the notch is on one flank and the home indicator on the other, so the thing that has to
+     dodge them is the RAILS — not the app. Background and borders now run edge to edge and the buttons
+     hug the safe area from inside it. (After the rail block above, which sets `padding` wholesale and
+     would otherwise wipe these.) */
+  .app.editor { padding: 0; }
+  .editor-grid > .mobilebar {
+    padding-left: calc(8px + env(safe-area-inset-left));
+    padding-right: calc(8px + env(safe-area-inset-right));
+  }
+  .editor-grid > .toolstrip { padding-left: calc(5px + env(safe-area-inset-left)); }
+  .editor-grid > .actionbar { padding-right: calc(5px + env(safe-area-inset-right)); }
+  .editor-grid > .toolstrip,
+  .editor-grid > .actionbar { padding-bottom: calc(6px + env(safe-area-inset-bottom)); }
+  .editor-grid > .toolstrip::-webkit-scrollbar,
+  .editor-grid > .actionbar::-webkit-scrollbar { display: none; }
+  .editor-grid > .toolstrip .tool-button,
+  .editor-grid > .actionbar .tool-button { width: 40px; height: 40px; font-size: 17px; }
+  .editor-grid > .toolstrip .tool-button.tool-primary { width: 42px; height: 42px; font-size: 19px; }
+  /* separators back to horizontal hairlines inside the vertical rails */
+  .editor-grid > .toolstrip .tool-sep,
+  .editor-grid > .actionbar .tool-sep { width: 24px; height: 1px; margin: 3px 0; align-self: center; }
+  /* The bottom-right corner is NOT free in landscape — the action rail lives there, and the FAB was
+     sitting on top of it, covering the very buttons it was supposed to be next to. Park it clear of
+     the rail, over the canvas: 51px of rail (40px tile + 5px padding either side + the 1px border)
+     plus a gap, plus whatever the notch takes. */
+  .mobile-fab {
+    bottom: calc(16px + var(--strip-h) + env(safe-area-inset-bottom));   /* the teaching strip is the last band here too */
+    right: calc(66px + env(safe-area-inset-right));
+  }
+  .stage-wrap .panel-foot { padding-right: 64px; }
+  /* Landscape has the opposite problem from portrait: width to spare, no height. A BOTTOM sheet here
+     was 88vh of a 390px screen — it swallowed the canvas whole, so you couldn't see the thing you
+     were editing while you edited it. Same sheet, same tabs, same panes: it just comes in from the
+     SIDE, where the room is. */
+  .editor-grid > .rightdock {
+    top: 0; bottom: 0; left: auto;
+    right: 0; width: min(54vw, 420px); height: auto;
+    padding-right: env(safe-area-inset-right);
+    border: 0; border-left: 1px solid var(--line); border-radius: 0;
+    transform: translateX(102%);
+    box-shadow: -8px 0 30px rgba(0, 0, 0, 0.18);
+  }
+  .app.sheet-open .editor-grid > .rightdock { transform: translateX(0); }
+  .editor-grid > .rightdock::before { display: none; }   /* the drag-handle pip reads as "pull down" */
+}

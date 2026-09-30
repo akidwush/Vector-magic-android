@@ -1,0 +1,67 @@
+/* Two-feature Vector Studio shell on top of Hector Vector's real editing canvas. */
+:root, :root[data-theme='light'], :root[data-theme='dark'], :root[data-theme='invert'] {
+  --bg:#080a0d; --fg:#eef8f4; --line:#263730; --muted:#9bafa7;
+  --checker-a:#101b19; --checker-b:#152522; --ink:#d7eee4; --ink-2:#fff;
+  --label:#b7d0c6; --hair:#30443c; --hair-2:#26362f; --surface:#13201b;
+  --accent:#36de9b; --on-ink:#09120e; --paper:#101916;
+  --hover:rgba(54,222,155,.10); --danger:#ff8181;
+}
+body {background:#080a0d;color:#edf7f3}
+#get-desktop,.rail-section.symbols,.rail-section.library,.rail-section.processor,.rail-section.jobs,.rail-section.info {display:none!important}
+.toolstrip [data-tool=curvature],.toolstrip [data-tool=artboard],.toolstrip [data-tool=width],
+.toolstrip [data-tool=mesh],.toolstrip [data-tool=envelope] {display:none!important}
+.app.editor .stage-wrap {min-width:0}
+.studio-brand {font-size:13px;font-weight:850;letter-spacing:.04em;color:#36de9b;white-space:nowrap}
+.studio-actions {position:fixed;top:9px;right:12px;z-index:86;display:flex;gap:7px;max-width:calc(100vw - 24px);}
+.studio-actions button,.studio-trace-actions button {
+  min-height:42px;padding:8px 13px;border:1px solid #335849;border-radius:12px;
+  background:#16241d;color:#e5fff3;font:600 13px system-ui,sans-serif;cursor:pointer;
+  box-shadow:0 3px 12px #0005;
+}
+.studio-actions button:focus-visible,.studio-trace-dialog button:focus-visible,
+.studio-trace-dialog input:focus-visible {outline:2px solid #48ffbd;outline-offset:2px}
+#studio-trace-button,#studio-trace-run {background:#149765!important;color:white!important;border-color:#39e9a7!important}
+.studio-trace-dialog[hidden],.studio-trace-dialog [hidden] {display:none!important}
+.studio-trace-dialog {position:fixed;inset:0;z-index:400;background:#000b;
+  display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;
+  backdrop-filter:blur(5px);}
+.studio-trace-sheet {width:min(540px,100%);max-height:min(94dvh,900px);overflow-y:auto;
+  background:#0d1312;color:#e9fcf2;border:1px solid #315846;border-radius:20px;
+  box-shadow:0 16px 55px #000a;padding:17px;box-sizing:border-box;font:14px/1.5 system-ui,sans-serif;}
+.studio-trace-head {display:flex;align-items:center;justify-content:space-between;gap:10px}
+.studio-trace-head strong {font-size:19px;color:#e8fff4}
+.studio-trace-head span {display:block;font-size:11px;color:#80d1ac}
+.studio-trace-sheet button {cursor:pointer;min-height:42px;font:600 13px system-ui,sans-serif}
+#studio-trace-close {border:1px solid #34483e;border-radius:10px;background:#1b2723;color:white;min-width:44px}
+.studio-trace-step {font-size:12px;color:#a9c4b4;margin:13px 0 7px}
+#studio-trace-pick {display:block;width:100%;border:1px dashed #38cd94;background:#142c22;
+  color:#acffdf;border-radius:13px;padding:18px 9px;text-align:center}
+#studio-trace-original {display:block;width:auto;height:auto;max-width:100%;max-height:24dvh;
+  margin:10px auto 0;border-radius:10px;object-fit:contain;background:repeating-conic-gradient(#26322b 0 25%,#192721 0 50%) 50%/16px 16px}
+.studio-trace-settings {display:grid;gap:8px;margin:12px 0;padding:11px;background:#132019;border-radius:12px}
+.studio-trace-settings label {display:grid;grid-template-columns:minmax(0,1fr) 1fr;gap:14px;align-items:center;
+  font-size:12px;color:#c9e8d8}
+.studio-trace-settings input {width:100%;accent-color:#25d997}
+#studio-trace-status {min-height:3.5em;color:#d5f3e3;margin:7px 0;font-size:12px;overflow-wrap:anywhere}
+.studio-trace-actions {display:flex;gap:7px;flex-wrap:wrap}
+.studio-trace-actions button {flex:1}
+.studio-trace-sheet button:disabled {opacity:.45;cursor:not-allowed}
+#studio-trace-cancel {border-color:#b86f58;background:#40251b!important}
+.studio-trace-tip {font-size:11px;color:#91b2a2;margin-top:8px}
+@media(max-width:720px){
+  .studio-actions {top:auto;bottom:calc(59px + env(safe-area-inset-bottom));left:50%;right:auto;
+    transform:translateX(-50%);justify-content:center;white-space:nowrap;
+    background:#0b1514ed;padding:5px;border:1px solid #31503e;border-radius:15px}
+  .studio-actions button {min-width:90px;min-height:43px;padding:8px 10px}
+  .studio-trace-dialog {padding:0;align-items:end}
+  .studio-trace-sheet {width:100%;max-height:92dvh;border-radius:20px 20px 0 0;
+    padding:16px 15px calc(18px + env(safe-area-inset-bottom));}
+}
+@media(max-width:390px){.studio-trace-settings label {gap:6px}}
+/* Keep Hector's useful editing tools, remove advanced niche tools from the small app UI.
+   The engine remains available; these buttons simply don't crowd the phone screen. */
+.tool-button[data-tool='width'],.tool-button[data-tool='envelope'],.tool-button[data-tool='mesh'],
+.tool-button[data-tool='shapebuilder'],.tool-button[data-tool='scissors'],
+.tool-button[data-tool='knife'],.tool-button[data-tool='eraser'],.tool-button[data-tool='blend'],
+.tool-button#act-union,.tool-button#act-subtract,.tool-button#act-intersect {display:none!important}
+.actionbar .tool-sep {display:none!important}
