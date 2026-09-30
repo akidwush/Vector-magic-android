@@ -176,63 +176,72 @@ export function pathNodes(svg, accept) {
   const out = [];
   svg.querySelectorAll("path").forEach((el) => {
     if (_anchorSkip(el)) return;
-    if (accept && !accept(el)) return;   // focus mode: restrict to the in-scope paths
+    if (accept && !accept(el)) return;
     const segs = parsePath(el.getAttribute("d") || "");
     el._hvSegs = segs;
-    const { toS, toL } = ctmMaps(el);   // local ⇄ stage (identity for top-level/baked)
-    // Editing anchors hand-edits the geometry: a live parametric shape becomes a plain
-    // freeform path (its data-hv-* params would otherwise regenerate over the edit).
+    const { toS, toL } = ctmMaps(el);
     const commit = () => { if (isLiveShape(el)) freezeShape(el); el.setAttribute("d", serializeSegs(el._hvSegs)); };
-    const draw = segs.filter((s) => s.end);     // M + drawing segments, in order
-    const n = draw.length;
-    if (!n) return;
-    const closed = segs[segs.length - 1] && segs[segs.length - 1].t === "Z";
-    const wrap = closed && n >= 2 &&
-      Math.hypot(draw[n - 1].end.x - draw[0].end.x, draw[n - 1].end.y - draw[0].end.y) < 1e-6;
-    const count = wrap ? n - 1 : n;             // the wrap segment is anchor-0's incoming, not its own anchor
-    const lead = (s) => (s && (s.t === "C" || s.t === "Q")) ? s.c1 : null;
-    const trail = (s) => s ? (s.t === "C" ? s.c2 : (s.t === "Q" ? s.c1 : null)) : null;
-    for (let k = 0; k < count; k++) {
-      const endSeg = draw[k];
-      const inSeg = k >= 1 ? draw[k] : (wrap ? draw[n - 1] : null);
-      const outSeg = (k + 1 < n) ? draw[k + 1] : null;
-      const inHlive = trail(inSeg), outHlive = lead(outSeg);   // live LOCAL control-point refs (or null)
-      const a = endSeg.end;                                    // live LOCAL anchor point
-      // x/y/inH/outH are STAGE-space snapshots (what the overlay renders); moveTo/setIn/
-      // setOut take stage coords and write back through toL so the geometry stays local.
-      const nd = {
-        el, id: el.getAttribute("data-hv-id"), k, x: 0, y: 0, inH: null, outH: null,
-        _refresh() {
-          const p = toS(a); this.x = p.x; this.y = p.y;
-          this.inH = inHlive ? toS(inHlive) : null;
-          this.outH = outHlive ? toS(outHlive) : null;
-        },
-        moveTo(nx, ny) {
-          const t = toL(nx, ny), dx = t.x - a.x, dy = t.y - a.y;
-          a.x = t.x; a.y = t.y;
-          if (k === 0 && wrap) { draw[n - 1].end.x = t.x; draw[n - 1].end.y = t.y; }
-          if (inHlive) { inHlive.x += dx; inHlive.y += dy; }
-          if (outHlive) { outHlive.x += dx; outHlive.y += dy; }
-          commit(); this._refresh();
-        },
-        setIn(nx, ny, mirror) {
-          if (!inHlive) return;
-          const t = toL(nx, ny);
-          inHlive.x = t.x; inHlive.y = t.y;
-          if (mirror && outHlive) { outHlive.x = 2 * a.x - t.x; outHlive.y = 2 * a.y - t.y; }
-          commit(); this._refresh();
-        },
-        setOut(nx, ny, mirror) {
-          if (!outHlive) return;
-          const t = toL(nx, ny);
-          outHlive.x = t.x; outHlive.y = t.y;
-          if (mirror && inHlive) { inHlive.x = 2 * a.x - t.x; inHlive.y = 2 * a.y - t.y; }
-          commit(); this._refresh();
-        },
-      };
-      nd._refresh();
-      out.push(nd);
+    const lead = (seg) => (seg && (seg.t === "C" || seg.t === "Q")) ? seg.c1 : null;
+    const trail = (seg) => seg ? (seg.t === "C" ? seg.c2 : (seg.t === "Q" ? seg.c1 : null)) : null;
+
+    // Compound path support: process one M...Z contour at a time. flatK matches
+    // pathToAnchors' flattened anchor index, while sub identifies the contour.
+    const groups = [];
+    let cur = null;
+    for (const seg of segs) {
+      if (seg.t === "M") { cur = { segs: [seg], closed: false }; groups.push(cur); }
+      else if (cur) { cur.segs.push(seg); if (seg.t === "Z") cur.closed = true; }
     }
+    let flatK = 0;
+    groups.forEach((group, sub) => {
+      const draw = group.segs.filter((seg) => seg.end);
+      const n = draw.length;
+      if (!n) return;
+      const wrap = group.closed && n >= 2 &&
+        Math.hypot(draw[n - 1].end.x - draw[0].end.x, draw[n - 1].end.y - draw[0].end.y) < 1e-6;
+      const count = wrap ? n - 1 : n;
+      for (let localK = 0; localK < count; localK++, flatK++) {
+        const endSeg = draw[localK];
+        const inSeg = localK >= 1 ? draw[localK] : (wrap ? draw[n - 1] : null);
+        const outSeg = (localK + 1 < n) ? draw[localK + 1] : null;
+        const inHlive = trail(inSeg), outHlive = lead(outSeg);
+        const a = endSeg.end;
+        const k = flatK;
+        const nd = {
+          el, id: el.getAttribute("data-hv-id"), k, sub, localK,
+          x: 0, y: 0, inH: null, outH: null,
+          _refresh() {
+            const p = toS(a); this.x = p.x; this.y = p.y;
+            this.inH = inHlive ? toS(inHlive) : null;
+            this.outH = outHlive ? toS(outHlive) : null;
+          },
+          moveTo(nx, ny) {
+            const t = toL(nx, ny), dx = t.x - a.x, dy = t.y - a.y;
+            a.x = t.x; a.y = t.y;
+            if (localK === 0 && wrap) { draw[n - 1].end.x = t.x; draw[n - 1].end.y = t.y; }
+            if (inHlive) { inHlive.x += dx; inHlive.y += dy; }
+            if (outHlive) { outHlive.x += dx; outHlive.y += dy; }
+            commit(); this._refresh();
+          },
+          setIn(nx, ny, mirror) {
+            if (!inHlive) return;
+            const t = toL(nx, ny);
+            inHlive.x = t.x; inHlive.y = t.y;
+            if (mirror && outHlive) { outHlive.x = 2 * a.x - t.x; outHlive.y = 2 * a.y - t.y; }
+            commit(); this._refresh();
+          },
+          setOut(nx, ny, mirror) {
+            if (!outHlive) return;
+            const t = toL(nx, ny);
+            outHlive.x = t.x; outHlive.y = t.y;
+            if (mirror && inHlive) { inHlive.x = 2 * a.x - t.x; inHlive.y = 2 * a.y - t.y; }
+            commit(); this._refresh();
+          },
+        };
+        nd._refresh();
+        out.push(nd);
+      }
+    });
   });
   return out;
 }
