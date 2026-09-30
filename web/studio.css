@@ -1095,3 +1095,70 @@ body {background:#080a0d;color:#edf7f3}
     .manual-bezier-tools small { font-size:7px; }
   }
 }
+
+
+/* ==========================================================================
+   Manual Trace Navigation Step 1 — explicit Alight-style Pan & Zoom mode
+   Draw/Edit stays touch-locked; the magnifier temporarily gives the canvas
+   one-finger pan + two-finger pinch without changing vector geometry.
+   ========================================================================== */
+.manual-nav-toggle { display:none; }
+
+@media (max-width:620px) {
+  .app.manual-vector-mode .editor-grid > .stage-wrap {
+    position:relative !important;
+  }
+  .app.manual-vector-mode .manual-nav-toggle:not([hidden]) {
+    display:grid;
+    place-items:center;
+    position:absolute;
+    top:9px;
+    left:9px;
+    z-index:127;
+    width:46px;
+    height:46px;
+    padding:0;
+    border:1px solid #4a5164;
+    border-radius:13px;
+    background:#242a3aeb;
+    color:#f3f5fa;
+    box-shadow:0 5px 16px #0008;
+    backdrop-filter:blur(7px);
+    -webkit-backdrop-filter:blur(7px);
+    touch-action:manipulation;
+  }
+  .app.manual-vector-mode .manual-nav-toggle svg {
+    width:25px;
+    height:25px;
+    fill:none;
+    stroke:currentColor;
+    stroke-width:2.2;
+    stroke-linecap:round;
+  }
+  .app.manual-vector-mode .manual-nav-toggle.active {
+    border-color:#28e4aa;
+    background:#0c775b;
+    color:#fff;
+    box-shadow:0 0 0 2px #22dca63a,0 6px 18px #0009;
+  }
+  .app.manual-panzoom-mode .stage-wrap {
+    cursor:grab;
+  }
+  .app.manual-panzoom-mode .manual-pad-surface {
+    opacity:.58;
+  }
+  .app.manual-panzoom-mode .manual-pad-surface::after {
+    content:"Pan & Zoom active";
+    inset:0;
+    display:grid;
+    place-items:center;
+    color:#e7fff7;
+    background:#171c29a8;
+    font:750 13px/1.2 system-ui,sans-serif;
+    letter-spacing:.01em;
+  }
+  .app.manual-panzoom-mode .manual-bezier-tools {
+    opacity:.42;
+    pointer-events:none;
+  }
+}
