@@ -113,22 +113,35 @@ with sync_playwright() as p:
       shell=page.evaluate("""() => {
         const rect=s=>document.querySelector(s)?.getBoundingClientRect();
         const css=s=>getComputedStyle(document.querySelector(s));
-        const stage=rect('.stage-wrap'), tools=rect('.toolstrip'), top=rect('#mobile-top'), status=rect('.status-bar');
+        const stage=rect('.stage-wrap'), manual=rect('#manual-trace-bar'), top=rect('#mobile-top'), status=rect('.status-bar');
         return {
           stageWidth:stage?.width||0, viewportWidth:innerWidth,
-          toolDirection:css('.toolstrip').flexDirection,
-          toolWidth:tools?.width||0, topHeight:top?.height||0,
+          manualDisplay:css('#manual-trace-bar').display,
+          manualWidth:manual?.width||0,
+          legacyToolsDisplay:css('.toolstrip').display,
           actionDisplay:css('.actionbar').display,
-          statusHeight:status?.height||0,
-          traceTop:rect('#studio-trace-button')?.top??999
+          topHeight:top?.height||0,statusHeight:status?.height||0,
+          traceTop:rect('#studio-trace-button')?.top??999,
+          manualButtons:document.querySelectorAll('#manual-trace-bar [data-manual-tool]').length,
+          fillVisible:(rect('#manual-fill')?.width||0)>0,
+          strokeVisible:(rect('#manual-stroke')?.width||0)>0
         };
       }""")
       assert shell['stageWidth'] >= width-2,shell
-      assert shell['toolDirection']=='row' and shell['toolWidth'] >= width-2,shell
+      assert shell['manualDisplay']=='flex' and shell['manualWidth'] >= width-2,shell
+      assert shell['legacyToolsDisplay']=='none',shell
       assert shell['actionDisplay']=='none',shell
+      assert shell['manualButtons']==3 and shell['fillVisible'] and shell['strokeVisible'],shell
       assert shell['topHeight'] <= 56 and shell['statusHeight'] <= 36,shell
       assert shell['traceTop'] < 16,shell
-      print(f'PASS Android canvas shell {width}px: full-width stage + bottom tools + compact chrome')
+      # Manual Trace Step 1: only three explicit modes, with an unmistakable active state.
+      page.locator('#manual-trace-bar [data-manual-tool="pen"]').click()
+      page.wait_for_function("window.editor.tool==='pen' && document.querySelector('#manual-trace-bar [data-manual-tool=pen]').getAttribute('aria-pressed')==='true'")
+      page.locator('#manual-trace-bar [data-manual-tool="node"]').click()
+      page.wait_for_function("window.editor.tool==='node' && document.querySelector('#manual-trace-bar [data-manual-tool=node]').classList.contains('active')")
+      page.locator('#manual-trace-bar [data-manual-tool="select"]').click()
+      page.wait_for_function("window.editor.tool==='select'")
+      print(f'PASS Manual Trace Step 1 {width}px: Select/Pen/Edit Points + Fill/Stroke')
     actual_requests=page.evaluate('window.__traceRequests') if EMBEDDED else requests
     assert len(actual_requests)==1,actual_requests
     if width==412:
