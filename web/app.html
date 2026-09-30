@@ -89,6 +89,14 @@
              undo/redo + zoom/fit buttons in here on a phone (and back out again above 620px),
              so every id-wired handler survives instead of being duplicated. -->
         <nav class="mobilebar" id="mobile-top" role="toolbar" aria-label="Quick actions"></nav>
+        <header class="manual-vector-head" id="manual-vector-head" hidden>
+          <button type="button" id="manual-vector-back" aria-label="Back to canvas">←</button>
+          <strong id="manual-vector-title">Vector Drawing</strong>
+          <span class="manual-vector-head-actions">
+            <button type="button" id="manual-vector-undo" aria-label="Undo">↶</button>
+            <button type="button" id="manual-vector-redo" aria-label="Redo">↷</button>
+          </span>
+        </header>
         <nav class="toolstrip" role="toolbar" aria-label="Tools">
           <button class="tool-button tool-primary active" data-tool="select" data-key="V" type="button" title="Select / Move (V) — drag empty space to marquee (Alt = lasso) · Ctrl+T scale · Ctrl+R rotate">▣</button>
           <button class="tool-button tool-primary" data-tool="node" data-key="A" type="button" title="Edit points (A) — anchors &amp; handles">✥</button>
@@ -143,6 +151,22 @@
             <span>Swipe to move cursor</span>
             <small>Tap to add point</small>
           </div>
+        </section>
+
+        <section class="manual-paint-sheet" id="manual-paint-sheet" hidden aria-label="Vector paint">
+          <div class="manual-paint-head">
+            <button type="button" id="manual-paint-back" aria-label="Back">←</button>
+            <div>
+              <strong id="manual-paint-title">Color &amp; Fill</strong>
+              <small id="manual-paint-target">Vector Layer</small>
+            </div>
+          </div>
+          <div class="manual-stroke-width" id="manual-stroke-width" hidden>
+            <label for="manual-stroke-range">Stroke Width</label>
+            <input id="manual-stroke-range" type="range" min="0" max="40" step="0.5" value="2" />
+            <output id="manual-stroke-value">2</output>
+          </div>
+          <div class="manual-paint-picker" id="manual-paint-picker"></div>
         </section>
 
         <aside class="manual-contour-dock" id="manual-contour-dock" hidden aria-label="Vector Layer contours">
