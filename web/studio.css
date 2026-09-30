@@ -969,6 +969,22 @@ body {background:#080a0d;color:#edf7f3}
   .app.manual-paint-open .manual-control-pad,
   .app.manual-paint-open .manual-contour-dock {display:none !important}
 
+  /* Fill/Stroke also work from Select mode: use the same picker as a bottom sheet. */
+  .app.manual-paint-open:not(.manual-vector-mode) .manual-paint-sheet:not([hidden]) {
+    display:grid !important;
+    position:fixed !important;
+    left:0;right:0;bottom:calc(62px + env(safe-area-inset-bottom));
+    z-index:130;
+    max-height:58dvh;
+    grid-template-rows:auto auto minmax(0,1fr);
+    overflow:hidden;
+    padding:8px 10px;
+    border:1px solid #343a50;
+    border-radius:18px 18px 0 0;
+    background:#24293af8;
+    box-shadow:0 -12px 30px #0009;
+  }
+
   /* Direct canvas touch remains forbidden in Pen; Edit Points only accepts nodes/handles. */
   .app.manual-vector-mode .stage-wrap[data-tool="pen"] .preview-frame,
   .app.manual-vector-mode .stage-wrap[data-tool="pen"] .viewport-content,
