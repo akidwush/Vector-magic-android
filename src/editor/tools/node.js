@@ -81,7 +81,10 @@ export const nodeMixin = {
     // constant ~5px on screen regardless of zoom (CTM.a = screen px per user unit)
     const m = this.stageCTM();
     const k = m ? Math.hypot(m.a, m.b) || 1 : 1;
-    const r = 5 / k, hr = 3.5 / k;
+    // Manual Trace node correction is the one allowed direct-canvas touch.
+    // Enlarge the actual SVG hit targets on touch without changing geometry.
+    const manualTouch = this._manualTraceTouchMode === "node";
+    const r = (manualTouch ? 9 : 5) / k, hr = (manualTouch ? 6 : 3.5) / k;
     const g = document.createElementNS(SVG_NS, "g");
     g.setAttribute("class", "hv-handles");
     // two layers so every anchor square sits above every direction-handle line/dot

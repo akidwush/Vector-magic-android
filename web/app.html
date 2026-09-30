@@ -127,6 +127,24 @@
           </button>
         </nav>
 
+        <section class="manual-control-pad" id="manual-control-pad" hidden aria-label="Pen Control Pad">
+          <div class="manual-control-head">
+            <div>
+              <strong>Pen Control Pad</strong>
+              <span id="manual-point-count">0 points</span>
+            </div>
+            <div class="manual-control-actions">
+              <button type="button" id="manual-close-path" disabled>Close</button>
+              <button type="button" id="manual-finish-path" disabled>Done</button>
+            </div>
+          </div>
+          <div class="manual-pad-surface" id="manual-pad-surface" role="button" tabindex="0"
+               aria-label="Swipe to move cursor, tap to add point">
+            <span>Swipe to move cursor</span>
+            <small>Tap to add point</small>
+          </div>
+        </section>
+
         <article class="stage-wrap preview-panel" data-tool="select">
           <!-- arrange/structure controls for the selection, across the top of the canvas -->
           <nav class="stage-toolbar" role="toolbar" aria-label="Arrange">

@@ -347,6 +347,16 @@ export function bindViewportTouch(vp) {
   vp.el.addEventListener("pointerdown", (event) => {
     if (event.pointerType !== "touch") return;
     if (!vp.el.querySelector(".viewport-content")) return;
+    // Manual Trace owns touch policy. Pen blocks ALL canvas touches; Edit
+    // Points lets actual node/Bezier handles receive one-finger correction,
+    // but never enrolls those touches into viewport pinch/pan tracking.
+    if (editor._manualTraceTouchMode) {
+      const handle = event.target?.closest?.(".hv-handle,.hv-node-anchor,.hv-node-handle");
+      if (editor._manualTraceTouchMode === "node" && handle) return;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const firstId = pts.size ? [...pts.keys()][0] : null;
     pts.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (pts.size !== 2) return;

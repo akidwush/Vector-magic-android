@@ -443,3 +443,130 @@ body {background:#080a0d;color:#edf7f3}
     bottom:calc(124px + env(safe-area-inset-bottom)) !important;
   }
 }
+
+
+/* ==========================================================================
+   Manual Trace Step 2 — Alight-style Pen Control Pad
+   ========================================================================== */
+.manual-control-pad { display:none; }
+
+@media (max-width:620px) {
+  .manual-control-pad:not([hidden]) {
+    display:block;
+    position:fixed;
+    left:7px;
+    right:7px;
+    bottom:calc(72px + env(safe-area-inset-bottom));
+    z-index:118;
+    box-sizing:border-box;
+    padding:8px;
+    border:1px solid #315647;
+    border-radius:16px;
+    background:#0d1513f5;
+    box-shadow:0 10px 30px #000a;
+    backdrop-filter:blur(9px);
+    -webkit-backdrop-filter:blur(9px);
+  }
+  .manual-control-head {
+    min-height:38px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    padding:0 2px 7px;
+  }
+  .manual-control-head > div:first-child {
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+    min-width:0;
+  }
+  .manual-control-head strong {
+    color:#e8fff5;
+    font:800 12px/1.1 system-ui,sans-serif;
+  }
+  .manual-control-head span {
+    color:#81bca5;
+    font:600 10px/1.1 system-ui,sans-serif;
+  }
+  .manual-control-actions { display:flex; gap:5px; }
+  .manual-control-actions button {
+    min-width:58px;
+    min-height:34px;
+    padding:0 9px;
+    border:1px solid #315044;
+    border-radius:10px;
+    background:#14221d;
+    color:#dff8ed;
+    font:700 11px system-ui,sans-serif;
+  }
+  .manual-control-actions button:disabled { opacity:.34; }
+
+  .manual-pad-surface {
+    height:min(23dvh,174px);
+    min-height:128px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:7px;
+    border:1px solid #34584a;
+    border-radius:14px;
+    background:
+      linear-gradient(#14201d,#111917),
+      radial-gradient(circle at center,#1f4b3a 0 1px,transparent 2px);
+    color:#b8d4c8;
+    user-select:none;
+    -webkit-user-select:none;
+    touch-action:none;
+    overscroll-behavior:contain;
+    outline:none;
+  }
+  .manual-pad-surface::before,
+  .manual-pad-surface::after {
+    content:"";
+    position:absolute;
+    pointer-events:none;
+  }
+  .manual-pad-surface span {
+    font:700 15px/1.2 system-ui,sans-serif;
+  }
+  .manual-pad-surface small {
+    color:#79998c;
+    font:600 11px/1.2 system-ui,sans-serif;
+  }
+  .manual-pad-surface.tracking {
+    border-color:#2fe0a5;
+    background:#10251d;
+  }
+
+  /* Pen = canvas is display-only. All finger input belongs to Control Pad. */
+  .stage-wrap[data-tool="pen"] .preview-frame,
+  .stage-wrap[data-tool="pen"] .viewport-content {
+    touch-action:none !important;
+  }
+
+  /* Edit Points also blocks canvas navigation; only actual SVG node/handle
+     elements receive the correction pointer through the editor policy. */
+  .stage-wrap[data-tool="node"] .preview-frame,
+  .stage-wrap[data-tool="node"] .viewport-content {
+    touch-action:none !important;
+  }
+
+  /* The Control Pad is the only bottom interaction surface while drawing. */
+  .manual-pad-open > .phone-ctxrow,
+  .manual-pad-open > .status-bar,
+  .manual-pad-open .mobile-fab {
+    display:none !important;
+  }
+
+  /* Crosshair must stay visually above artwork but never steal input. */
+  .manual-trace-crosshair { pointer-events:none !important; }
+
+  /* Touch correction targets: visually obvious in Edit Points. */
+  .stage-wrap[data-tool="node"] .hv-node-anchor,
+  .stage-wrap[data-tool="node"] .hv-node-handle,
+  .stage-wrap[data-tool="node"] .hv-handle {
+    stroke-width:1.7 !important;
+  }
+}

@@ -444,6 +444,17 @@ const editor = {
     this._renderSelection(); this._renderInspector();
   },
   _onPointerDown(e) {
+    // Manual Trace on phones is intentionally indirect: Pen input comes only
+    // from the Control Pad. Edit Points may touch real anchors/Bezier handles,
+    // but touching path bodies / empty canvas must do nothing.
+    if (e.pointerType === "touch" && this._manualTraceTouchMode) {
+      const handle = e.target?.closest?.(".hv-handle,.hv-node-anchor,.hv-node-handle");
+      const allowedNodeTouch = this._manualTraceTouchMode === "node" && !!handle;
+      if (!allowedNodeTouch) {
+        e.preventDefault(); e.stopPropagation();
+        return;
+      }
+    }
     if (this._touchGesture) return;   // two-finger pinch/pan in progress → the viewport owns this touch
     if (this._spacePan) return;   // spacebar held → let the viewport pan the drag (don't select/draw)
     if (e.button !== 0) return;   // right/middle clicks are for the context menu, not draw/select

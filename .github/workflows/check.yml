@@ -25,12 +25,18 @@ jobs:
           node --check src/trace/import.js
           node --check src/trace/sanitize.js
           node --check src/manual-trace/ui.js
+          node --check src/editor.js
+          node --check src/editor/tools/pen.js
+          node --check src/editor/tools/node.js
+          node --check src/ui/viewport.js
       - name: Netlify static build
         run: |
           bash scripts/build-netlify.sh
           test -s dist/index.html
           test -s dist/src/trace/ui.js
           test -s dist/src/manual-trace/ui.js
+          grep -q 'manual-control-pad' dist/index.html
+          grep -q 'Manual Trace Step 2' dist/studio.css
           test -s dist/studio.css
           test ! -e dist/netlify
       - name: Install Chromium QA
