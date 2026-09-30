@@ -109,6 +109,26 @@ with sync_playwright() as p:
     assert 'grad1' in doc['fill'],doc
     assert doc['appIsCloud'] and doc['editorStage'] and doc['svgImages']==0,doc
     assert not doc['overflow'],doc
+    if width < 600:
+      shell=page.evaluate("""() => {
+        const rect=s=>document.querySelector(s)?.getBoundingClientRect();
+        const css=s=>getComputedStyle(document.querySelector(s));
+        const stage=rect('.stage-wrap'), tools=rect('.toolstrip'), top=rect('#mobile-top'), status=rect('.status-bar');
+        return {
+          stageWidth:stage?.width||0, viewportWidth:innerWidth,
+          toolDirection:css('.toolstrip').flexDirection,
+          toolWidth:tools?.width||0, topHeight:top?.height||0,
+          actionDisplay:css('.actionbar').display,
+          statusHeight:status?.height||0,
+          traceTop:rect('#studio-trace-button')?.top??999
+        };
+      }""")
+      assert shell['stageWidth'] >= width-2,shell
+      assert shell['toolDirection']=='row' and shell['toolWidth'] >= width-2,shell
+      assert shell['actionDisplay']=='none',shell
+      assert shell['topHeight'] <= 56 and shell['statusHeight'] <= 36,shell
+      assert shell['traceTop'] < 16,shell
+      print(f'PASS Android canvas shell {width}px: full-width stage + bottom tools + compact chrome')
     actual_requests=page.evaluate('window.__traceRequests') if EMBEDDED else requests
     assert len(actual_requests)==1,actual_requests
     if width==412:
