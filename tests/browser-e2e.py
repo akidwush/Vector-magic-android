@@ -293,8 +293,8 @@ with sync_playwright() as p:
       # Background touch in Edit Points cannot start pinch/pan or create geometry.
       page.touchscreen.tap(svg_box['x']+4,svg_box['y']+4)
       assert not page.evaluate('Boolean(window.editor._touchGesture)')
-      page.locator('#manual-trace-bar [data-manual-tool="select"]').click()
-      page.wait_for_function("window.editor.tool==='select' && window.editor._manualTraceTouchMode===null")
+      page.locator('#manual-vector-back').click()
+      page.wait_for_function("window.editor.tool==='select' && window.editor._manualTraceTouchMode===null && document.querySelector('#manual-vector-head').hidden")
       if width==390:
         # remove Control-Pad node edit, appended contour, Stroke, Fill, then initial manual path
         page.evaluate('window.editor.undo();window.editor.undo();window.editor.undo();window.editor.undo();window.editor.undo()')
