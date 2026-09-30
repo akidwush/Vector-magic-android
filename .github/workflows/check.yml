@@ -1,0 +1,41 @@
+name: Vector Studio checks
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Node backend and preprocessing tests
+        run: |
+          node tests/trace-backend.mjs
+          node tests/trace-preprocess.mjs
+          node --check src/trace/ui.js
+          node --check src/trace/import.js
+          node --check src/trace/sanitize.js
+      - name: Netlify static build
+        run: |
+          bash scripts/build-netlify.sh
+          test -s dist/index.html
+          test -s dist/src/trace/ui.js
+          test -s dist/studio.css
+          test ! -e dist/netlify
+      - name: Install Chromium QA
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Browser integration (mocked external Vector Ink response)
+        run: |
+          python -m http.server 8976 --directory dist >/tmp/vs-http.log 2>&1 &
+          python tests/browser-e2e.py
