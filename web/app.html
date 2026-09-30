@@ -105,6 +105,28 @@
           <button class="tool-button" data-tool="artboard" data-key="⇧O" type="button" title="Artboard (Shift+O) — drag on the canvas to add one, sized and placed exactly there">▤</button>
         </nav>
 
+        <!-- Vector Studio Android manual-trace controls.
+             These are intentionally NOT Hector .tool-button clones: the small bridge module
+             switches the real editor modes and mirrors the real fill/stroke swatches. -->
+        <nav class="manual-trace-bar" id="manual-trace-bar" aria-label="Manual trace tools">
+          <button type="button" class="manual-trace-tool active" data-manual-tool="select" aria-pressed="true">
+            <span class="manual-tool-icon" aria-hidden="true">▣</span><span>Select</span>
+          </button>
+          <button type="button" class="manual-trace-tool" data-manual-tool="pen" aria-pressed="false">
+            <span class="manual-tool-icon" aria-hidden="true">✒</span><span>Pen</span>
+          </button>
+          <button type="button" class="manual-trace-tool" data-manual-tool="node" aria-pressed="false">
+            <span class="manual-tool-icon" aria-hidden="true">✥</span><span>Edit Points</span>
+          </button>
+          <span class="manual-trace-divider" aria-hidden="true"></span>
+          <button type="button" class="manual-paint-chip" id="manual-fill">
+            <span class="manual-paint-dot" aria-hidden="true"></span><span>Fill</span>
+          </button>
+          <button type="button" class="manual-paint-chip" id="manual-stroke">
+            <span class="manual-paint-dot" aria-hidden="true"></span><span>Stroke</span>
+          </button>
+        </nav>
+
         <article class="stage-wrap preview-panel" data-tool="select">
           <!-- arrange/structure controls for the selection, across the top of the canvas -->
           <nav class="stage-toolbar" role="toolbar" aria-label="Arrange">
