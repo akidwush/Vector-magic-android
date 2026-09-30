@@ -37,7 +37,8 @@ def mount_embedded_app(page):
         html=html.replace('<link rel="stylesheet" href="/'+css+'" />',
                           '<style>'+ (root/'web'/css).read_text()+'</style>')
     html=html.replace('<script type="module" src="/src/app.js"></script>',
-      '<script type="importmap">'+json.dumps({'imports':mapping})+'</script>'+\n      '<script type="module">import("@vs/src/app.js").catch(e=>{window.__moduleError=e.stack||String(e);console.error(e.stack||e);});</script>')
+      '<script type="importmap">'+json.dumps({'imports':mapping})+'</script>'+
+      '<script type="module">import("@vs/src/app.js").catch(e=>{window.__moduleError=e.stack||String(e);console.error(e.stack||e);});</script>')
     page.set_content(html,wait_until='domcontentloaded')
 
 with sync_playwright() as p:
