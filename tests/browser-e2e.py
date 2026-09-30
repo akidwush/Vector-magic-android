@@ -134,14 +134,57 @@ with sync_playwright() as p:
       assert shell['manualButtons']==3 and shell['fillVisible'] and shell['strokeVisible'],shell
       assert shell['topHeight'] <= 56 and shell['statusHeight'] <= 36,shell
       assert shell['traceTop'] < 16,shell
-      # Manual Trace Step 1: only three explicit modes, with an unmistakable active state.
+      # Manual Trace Step 2: Pen canvas is touch-locked; Control Pad owns placement.
       page.locator('#manual-trace-bar [data-manual-tool="pen"]').click()
-      page.wait_for_function("window.editor.tool==='pen' && document.querySelector('#manual-trace-bar [data-manual-tool=pen]').getAttribute('aria-pressed')==='true'")
+      page.wait_for_function("""window.editor.tool==='pen'
+        && window.editor._manualTraceTouchMode==='pen'
+        && !document.querySelector('#manual-control-pad').hidden
+        && document.querySelector('#manual-trace-bar [data-manual-tool=pen]').getAttribute('aria-pressed')==='true'""")
+      svg_box=page.locator('svg.inline-svg').bounding_box()
+      assert svg_box, 'SVG stage has no box'
+      page.touchscreen.tap(svg_box['x']+svg_box['width']*.55,svg_box['y']+svg_box['height']*.55)
+      assert page.evaluate('window.editor._pen===null'), 'canvas touch illegally started Pen path'
+
+      cursor0=page.evaluate('window.manualTraceUI.getCursor()')
+      pad_box=page.locator('#manual-pad-surface').bounding_box()
+      assert pad_box, 'Control Pad has no box'
+      # Swipe is relative cursor movement and must NOT place a point.
+      x=pad_box['x']+pad_box['width']*.42;y=pad_box['y']+pad_box['height']*.50
+      page.mouse.move(x,y);page.mouse.down();page.mouse.move(x+46,y+18,steps=4);page.mouse.up()
+      cursor1=page.evaluate('window.manualTraceUI.getCursor()')
+      assert abs(cursor1['x']-cursor0['x'])+abs(cursor1['y']-cursor0['y'])>0.1,(cursor0,cursor1)
+      assert page.evaluate('window.editor._pen===null'), 'Control Pad swipe illegally placed point'
+
+      # Tap Control Pad = one real Hector Pen anchor.
+      page.locator('#manual-pad-surface').click(position={'x':pad_box['width']*.50,'y':pad_box['height']*.50})
+      page.wait_for_function("window.editor._pen?.pts?.length===1")
+      # Direct canvas touch stays blocked even while a path is in progress.
+      page.touchscreen.tap(svg_box['x']+svg_box['width']*.35,svg_box['y']+svg_box['height']*.35)
+      assert page.evaluate('window.editor._pen?.pts?.length===1'), 'canvas touch added an anchor'
+
+      # Move crosshair elsewhere, tap second point, then finish the open path.
+      page.mouse.move(x,y);page.mouse.down();page.mouse.move(x-52,y+32,steps=4);page.mouse.up()
+      page.locator('#manual-pad-surface').click(position={'x':pad_box['width']*.52,'y':pad_box['height']*.52})
+      page.wait_for_function("window.editor._pen?.pts?.length===2 && !document.querySelector('#manual-finish-path').disabled")
+      page.locator('#manual-finish-path').click()
+      page.wait_for_function("window.editor._pen===null && window.editor.selection.size===1")
+
+      # Edit Points: no viewport gesture; only enlarged anchor/Bezier handles are touch targets.
       page.locator('#manual-trace-bar [data-manual-tool="node"]').click()
-      page.wait_for_function("window.editor.tool==='node' && document.querySelector('#manual-trace-bar [data-manual-tool=node]').classList.contains('active')")
+      page.wait_for_function("""window.editor.tool==='node'
+        && window.editor._manualTraceTouchMode==='node'
+        && document.querySelector('.hv-node-anchor')""")
+      node_box=page.locator('.hv-node-anchor').first.bounding_box()
+      assert node_box and node_box['width']>=15 and node_box['height']>=15,node_box
+      page.touchscreen.tap(node_box['x']+node_box['width']/2,node_box['y']+node_box['height']/2)
+      page.wait_for_function("window.editor._nodeSel?.size>=1")
+      # Background touch in Edit Points cannot start pinch/pan or create geometry.
+      page.touchscreen.tap(svg_box['x']+4,svg_box['y']+4)
+      assert not page.evaluate('Boolean(window.editor._touchGesture)')
       page.locator('#manual-trace-bar [data-manual-tool="select"]').click()
-      page.wait_for_function("window.editor.tool==='select'")
-      print(f'PASS Manual Trace Step 1 {width}px: Select/Pen/Edit Points + Fill/Stroke')
+      page.wait_for_function("window.editor.tool==='select' && window.editor._manualTraceTouchMode===null")
+      page.evaluate('window.editor.undo()')  # remove QA manual path; keep traced document
+      print(f'PASS Manual Trace Step 2 {width}px: touch lock + Control Pad + node correction')
     actual_requests=page.evaluate('window.__traceRequests') if EMBEDDED else requests
     assert len(actual_requests)==1,actual_requests
     if width==412:
