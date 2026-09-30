@@ -28,6 +28,7 @@ jobs:
           node --check src/editor.js
           node --check src/editor/tools/pen.js
           node --check src/editor/tools/node.js
+          node --check src/hv/shapes.js
           node --check src/ui/viewport.js
       - name: Netlify static build
         run: |
@@ -37,6 +38,8 @@ jobs:
           test -s dist/src/manual-trace/ui.js
           grep -q 'manual-control-pad' dist/index.html
           grep -q 'Manual Trace Step 2' dist/studio.css
+          grep -q 'manual-contour-dock' dist/index.html
+          grep -q 'Manual Trace Step 3' dist/studio.css
           test -s dist/studio.css
           test ! -e dist/netlify
       - name: Install Chromium QA

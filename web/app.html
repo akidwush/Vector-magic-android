@@ -145,6 +145,22 @@
           </div>
         </section>
 
+        <aside class="manual-contour-dock" id="manual-contour-dock" hidden aria-label="Vector Layer contours">
+          <button type="button" class="manual-contour-title" id="manual-contour-title" aria-expanded="false">
+            <span id="manual-contour-name">Contour 1</span>
+            <small id="manual-contour-total">1 / 1</small>
+          </button>
+          <div class="manual-contour-menu" id="manual-contour-menu" hidden>
+            <button type="button" class="manual-add-contour" id="manual-add-contour">＋ Add Contour</button>
+            <div class="manual-contour-list" id="manual-contour-list" role="listbox" aria-label="Contours"></div>
+          </div>
+          <div class="manual-contour-scroller" aria-label="Contour Scroller">
+            <button type="button" id="manual-contour-prev" aria-label="Previous contour">▲</button>
+            <input id="manual-contour-range" type="range" min="1" max="1" value="1" step="1" aria-label="Contour Scroller" />
+            <button type="button" id="manual-contour-next" aria-label="Next contour">▼</button>
+          </div>
+        </aside>
+
         <article class="stage-wrap preview-panel" data-tool="select">
           <!-- arrange/structure controls for the selection, across the top of the canvas -->
           <nav class="stage-toolbar" role="toolbar" aria-label="Arrange">

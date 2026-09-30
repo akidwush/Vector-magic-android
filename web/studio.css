@@ -570,3 +570,128 @@ body {background:#080a0d;color:#edf7f3}
     stroke-width:1.7 !important;
   }
 }
+
+
+/* ==========================================================================
+   Manual Trace Step 3 — Vector Layer contours
+   ========================================================================== */
+.manual-contour-dock { display:none; }
+
+@media (max-width:620px) {
+  .manual-contour-dock:not([hidden]) {
+    display:flex;
+    position:fixed;
+    right:8px;
+    top:112px;
+    z-index:121;
+    flex-direction:column;
+    align-items:stretch;
+    gap:6px;
+    width:92px;
+    padding:6px;
+    border:1px solid #315647;
+    border-radius:15px;
+    background:#0b1411ee;
+    box-shadow:0 8px 24px #0009;
+    backdrop-filter:blur(8px);
+    -webkit-backdrop-filter:blur(8px);
+  }
+  .manual-contour-title,
+  .manual-contour-scroller button,
+  .manual-add-contour,
+  .manual-contour-item {
+    border:1px solid #315044;
+    background:#13211c;
+    color:#e2f8ee;
+    border-radius:10px;
+    font:700 11px system-ui,sans-serif;
+  }
+  .manual-contour-title {
+    min-height:42px;
+    padding:5px 6px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:2px;
+  }
+  .manual-contour-title small { color:#7fb39f;font-size:9px;font-weight:700; }
+  .manual-contour-title[aria-expanded="true"] {
+    border-color:#34dca3;
+    background:#123326;
+  }
+  .manual-contour-scroller {
+    display:grid;
+    grid-template-rows:32px 126px 32px;
+    gap:4px;
+    justify-items:center;
+    align-items:center;
+  }
+  .manual-contour-scroller button {
+    width:38px;
+    height:32px;
+    padding:0;
+  }
+  .manual-contour-scroller button:disabled { opacity:.3; }
+  #manual-contour-range {
+    width:126px;
+    height:28px;
+    margin:0;
+    accent-color:#26dfa4;
+    transform:rotate(-90deg);
+    touch-action:none;
+  }
+  .manual-contour-menu {
+    position:absolute;
+    top:0;
+    right:100px;
+    width:min(228px,calc(100vw - 122px));
+    max-height:54dvh;
+    overflow:auto;
+    padding:7px;
+    border:1px solid #315647;
+    border-radius:14px;
+    background:#101a17fa;
+    box-shadow:0 12px 30px #000b;
+  }
+  .manual-add-contour {
+    width:100%;
+    min-height:44px;
+    margin-bottom:6px;
+    color:#65efbc;
+    border-color:#3d745f;
+  }
+  .manual-add-contour:disabled { opacity:.35; }
+  .manual-contour-list { display:grid; gap:5px; }
+  .manual-contour-item {
+    width:100%;
+    min-height:46px;
+    padding:6px 9px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    text-align:left;
+  }
+  .manual-contour-item small { color:#86aa9b;font-size:9px;font-weight:600; }
+  .manual-contour-item.active {
+    background:#12684d;
+    border-color:#38e6ac;
+    color:#fff;
+  }
+
+  /* Keep the right contour scroller usable above the Pen Control Pad. */
+  .manual-pad-open .manual-contour-dock:not([hidden]) {
+    top:96px;
+  }
+
+  /* In Edit Points the scroller stays visible while all non-focused contours
+     remain part of the SAME SVG path; only their handles are hidden. */
+  .stage-wrap[data-tool="node"] ~ .manual-contour-dock,
+  .manual-contour-dock { touch-action:manipulation; }
+}
+
+@media (max-width:390px) {
+  .manual-contour-dock:not([hidden]) { width:82px;right:5px; }
+  .manual-contour-menu { right:90px;width:min(210px,calc(100vw - 105px)); }
+}

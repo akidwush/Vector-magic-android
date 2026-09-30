@@ -169,6 +169,66 @@ with sync_playwright() as p:
       page.locator('#manual-finish-path').click()
       page.wait_for_function("window.editor._pen===null && window.editor.selection.size===1")
 
+      # Step 3 on 390px: append a second contour to the SAME Vector Layer, use the
+      # Contour Scroller to focus it, edit it, and verify standard SVG export keeps both.
+      if width==390:
+        page.wait_for_function("""!document.querySelector('#manual-contour-dock').hidden
+          && window.editor.manualVectorLayerContours().contours.length===1""")
+        page.locator('#manual-contour-title').click()
+        page.locator('#manual-add-contour').click()
+        page.wait_for_function("window.editor._pen?.contourAppend===true")
+        # Two-point open contour is enough to validate compound-path storage/edit/export.
+        page.locator('#manual-pad-surface').click(position={'x':pad_box['width']*.46,'y':pad_box['height']*.44})
+        page.wait_for_function("window.editor._pen?.pts?.length===1")
+        page.mouse.move(x,y);page.mouse.down();page.mouse.move(x+58,y-34,steps=4);page.mouse.up()
+        page.locator('#manual-pad-surface').click(position={'x':pad_box['width']*.54,'y':pad_box['height']*.55})
+        page.wait_for_function("window.editor._pen?.pts?.length===2")
+        page.locator('#manual-finish-path').click()
+        page.wait_for_function("""window.editor._pen===null
+          && window.editor.manualVectorLayerContours().contours.length===2
+          && document.querySelector('#manual-contour-range').max==='2'""")
+        compound=page.evaluate(r'''() => {
+          const p=window.editor.manualVectorLayerTarget();
+          const d=p.getAttribute('d')||'';
+          return {paths:window.editor.stage.querySelectorAll('path').length,
+            moves:(d.match(/M/g)||[]).length,d,
+            range:document.querySelector('#manual-contour-range').max};
+        }''')
+        assert compound['moves']==2 and compound['range']=='2',compound
+
+        # Use the actual Contour Scroller to select Contour 2.
+        page.evaluate("""() => {
+          const r=document.querySelector('#manual-contour-range');
+          r.value='2';r.dispatchEvent(new Event('input',{bubbles:true}));
+        }""")
+        page.wait_for_function("""window.editor.tool==='node'
+          && window.editor._manualContourFocus?.sub===1
+          && window.editor._nodeEls?.size===2
+          && [...window.editor._nodeEls.values()].every(x=>x.nd.sub===1)""")
+
+        # Drag one focused node. Contour 1's serialized subpath must remain byte-identical.
+        before_parts=page.evaluate("""() => (window.editor.manualVectorLayerTarget().getAttribute('d')||'').match(/M[^M]*/g)""")
+        focused=page.locator('.hv-node-anchor').first.bounding_box()
+        assert focused, 'focused contour has no node handle'
+        page.mouse.move(focused['x']+focused['width']/2,focused['y']+focused['height']/2)
+        page.mouse.down();page.mouse.move(focused['x']+focused['width']/2+12,focused['y']+focused['height']/2+7,steps=4);page.mouse.up()
+        after_parts=page.evaluate("""() => (window.editor.manualVectorLayerTarget().getAttribute('d')||'').match(/M[^M]*/g)""")
+        assert len(before_parts)==2 and len(after_parts)==2 and before_parts[0]==after_parts[0] and before_parts[1]!=after_parts[1],(before_parts,after_parts)
+
+        exported=page.evaluate(r'''() => {
+          const layer=window.editor.manualVectorLayerTarget();
+          const live=layer.getAttribute('d')||'';
+          const xml=window.editor.serialize();
+          const doc=new DOMParser().parseFromString(xml,'image/svg+xml');
+          const ds=[...doc.querySelectorAll('path')].map(p=>p.getAttribute('d')||'');
+          return {liveMoves:(live.match(/M/g)||[]).length,
+            matching:ds.filter(d=>d===live).length,
+            exportedMoves:ds.map(d=>(d.match(/M/g)||[]).length).sort((a,b)=>b-a)[0]||0,
+            leaks:/data-vs-|manual-contour/i.test(xml)};
+        }''')
+        assert exported['liveMoves']==2 and exported['matching']==1 and exported['exportedMoves']>=2 and not exported['leaks'],exported
+        print('PASS Manual Trace Step 3 390px: Add Contour + scroller focus + isolated edit + compound SVG export')
+
       # Edit Points: no viewport gesture; only enlarged anchor/Bezier handles are touch targets.
       page.locator('#manual-trace-bar [data-manual-tool="node"]').click()
       page.wait_for_function("""window.editor.tool==='node'
@@ -183,7 +243,11 @@ with sync_playwright() as p:
       assert not page.evaluate('Boolean(window.editor._touchGesture)')
       page.locator('#manual-trace-bar [data-manual-tool="select"]').click()
       page.wait_for_function("window.editor.tool==='select' && window.editor._manualTraceTouchMode===null")
-      page.evaluate('window.editor.undo()')  # remove QA manual path; keep traced document
+      if width==390:
+        # remove focused-node edit, appended contour, then initial manual path
+        page.evaluate('window.editor.undo();window.editor.undo();window.editor.undo()')
+      else:
+        page.evaluate('window.editor.undo()')  # remove QA manual path; keep traced document
       print(f'PASS Manual Trace Step 2 {width}px: touch lock + Control Pad + node correction')
     actual_requests=page.evaluate('window.__traceRequests') if EMBEDDED else requests
     assert len(actual_requests)==1,actual_requests
