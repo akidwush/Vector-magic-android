@@ -11,6 +11,56 @@ import { setStatus } from "../../app.js";
 import { snapPoint, snap45 } from "../snap.js";
 
 export const penMixin = {
+  // Manual-trace bridge used by the Android Control Pad. It writes through the
+  // SAME _pen state and _finishPen() path as the normal Pen tool, so history,
+  // styling and SVG serialization stay identical. Screen touches never need to
+  // synthesize a fake canvas click.
+  manualPenPlacePoint(pt) {
+    if (!this.stage || this.tool !== "pen" || !pt) return false;
+    const p = { x: Number(pt.x), y: Number(pt.y) };
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return false;
+    if (!this._pen) {
+      this._renderPenHint(null); this._setPenCursor(null);
+      this.beginCoalesce();
+      this.selection = new Set(); this.artboardSelected = false; this._renderSelection();
+      const node = document.createElementNS(SVG_NS, "path");
+      node.setAttribute("fill", "none");
+      node.setAttribute("stroke", "#1d1d1f");
+      node.setAttribute("stroke-width", "1.5");
+      node.setAttribute("vector-effect", "non-scaling-stroke");
+      this._artHome().insertBefore(node, this._artBefore());
+      this._pen = { node, pts: [], closed: false, dragging: false, manual: true };
+    }
+    if (this._pen.pts.length >= 3 && this._penNearFirst(p)) {
+      this._pen.closed = true;
+      this._finishPen(true);
+      return true;
+    }
+    this._pen.pts.push({ x: p.x, y: p.y, in: null, out: null });
+    this._redrawPen();
+    this._renderPenMarks();
+    return true;
+  },
+  manualPenPreview(pt) {
+    if (!this._pen || this.tool !== "pen" || !pt) return false;
+    const p = { x: Number(pt.x), y: Number(pt.y) };
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return false;
+    const close = this._pen.pts.length >= 3 && this._penNearFirst(p);
+    this._redrawPen(close ? null : p);
+    this._renderPenMarks(close);
+    return true;
+  },
+  manualPenClose() {
+    if (!this._pen || this._pen.pts.length < 3) return false;
+    this._pen.closed = true;
+    this._finishPen(true);
+    return true;
+  },
+  manualPenFinishOpen() {
+    if (!this._pen || this._pen.pts.length < 2) return false;
+    this._finishPen(true);
+    return true;
+  },
   _penDown(e) {
     if (e.button !== 0) return;
     if (this._penTempSelect) return;   // Ctrl/Cmd held → Direct-Select mode owns the canvas (handle drags only)
