@@ -1,5 +1,6 @@
 // Android-first Manual Trace UI.
-// Step 4: Alight-style workspace + real Fill/Stroke editing against the active Vector Layer.
+// Step 5: Alight-style Control Pad, compound contours, real Fill/Stroke,
+// and Curve/Bezier point editing without covering the canvas.
 import { openColorPicker } from "../ui/colorpicker.js";
 
 const SVG_NS="http://www.w3.org/2000/svg";
@@ -20,6 +21,11 @@ export function installManualTraceUI({editor,setStatus}) {
   const pointCount=document.querySelector('#manual-point-count');
   const closePath=document.querySelector('#manual-close-path');
   const finishPath=document.querySelector('#manual-finish-path');
+
+  const bezierTools=document.querySelector('#manual-bezier-tools');
+  const bezierButtons=[...(bezierTools?.querySelectorAll('[data-bezier-action]')||[])];
+  const handleSideWrap=document.querySelector('#manual-handle-side');
+  const handleSideButtons=[...(handleSideWrap?.querySelectorAll('[data-handle-side]')||[])];
 
   const paintSheet=document.querySelector('#manual-paint-sheet');
   const paintBack=document.querySelector('#manual-paint-back');
@@ -49,6 +55,9 @@ export function installManualTraceUI({editor,setStatus}) {
 
   let cursor={x:0,y:0},cursorStage=null,activePointer=null;
   let paintCtl=null,paintMode=null,paintCoalescing=false,nodeCoalescing=false;
+  let nodeAction='move';          // move | handle | add
+  let handleRelation='mirror';   // mirror | break
+  let handleSide='out';          // in | out
 
   const currentTool=()=>stageWrap.getAttribute('data-tool')||editor.tool||'select';
   const touchModeFor=(tool)=>tool==='pen'?'pen':tool==='node'?'node':null;
@@ -73,10 +82,15 @@ export function installManualTraceUI({editor,setStatus}) {
     }
     clampCursor();return true;
   }
+  function setCursor(pt){
+    if(!pt||!Number.isFinite(Number(pt.x))||!Number.isFinite(Number(pt.y)))return false;
+    cursorStage=editor.stage;cursor={x:Number(pt.x),y:Number(pt.y)};clampCursor();renderCrosshair();return true;
+  }
   function clearCrosshair(){document.querySelectorAll('.manual-trace-crosshair').forEach(n=>n.remove());}
+  function crosshairWanted(){return currentTool()==='pen'||(currentTool()==='node'&&nodeAction==='add');}
   function renderCrosshair(){
     clearCrosshair();
-    if(currentTool()!=='pen'||!ensureCursor())return;
+    if(!crosshairWanted()||!ensureCursor())return;
     const ov=editor._overlayEl?.();if(!ov)return;
     const m=editor.stageCTM?.(),k=m?Math.hypot(m.a,m.b)||1:1;
     const arm=11/k,r=2.8/k,sw=1.5/k;
@@ -84,7 +98,8 @@ export function installManualTraceUI({editor,setStatus}) {
     const line=(x1,y1,x2,y2)=>{const n=document.createElementNS(SVG_NS,'line');n.setAttribute('x1',x1);n.setAttribute('y1',y1);n.setAttribute('x2',x2);n.setAttribute('y2',y2);n.setAttribute('stroke','#20e3a7');n.setAttribute('stroke-width',sw);n.setAttribute('vector-effect','non-scaling-stroke');g.appendChild(n);};
     line(cursor.x-arm,cursor.y,cursor.x+arm,cursor.y);line(cursor.x,cursor.y-arm,cursor.x,cursor.y+arm);
     const c=document.createElementNS(SVG_NS,'circle');c.setAttribute('cx',cursor.x);c.setAttribute('cy',cursor.y);c.setAttribute('r',r);c.setAttribute('fill','#20e3a7');c.setAttribute('stroke','#08100d');c.setAttribute('stroke-width',1/k);g.appendChild(c);
-    ov.appendChild(g);editor.manualPenPreview?.(cursor);
+    ov.appendChild(g);
+    if(currentTool()==='pen')editor.manualPenPreview?.(cursor);
   }
 
   function paintVisual(state){
@@ -137,6 +152,7 @@ export function installManualTraceUI({editor,setStatus}) {
     app?.classList.add('manual-paint-open');
     if(pad)pad.hidden=true;
     if(contourDock)contourDock.hidden=true;
+    if(bezierTools)bezierTools.hidden=true;
 
     const applySolid=(w,hex,a)=>{
       ensurePaintHistory();
@@ -202,7 +218,59 @@ export function installManualTraceUI({editor,setStatus}) {
     const state=contourState();if(!state.node||state.drawing||!state.contours.length)return;
     const i=Math.max(0,Math.min(state.contours.length-1,Number(index)||0));
     if(currentTool()!=='node'){editor._manualTraceTouchMode='node';editor.setTool('node');}
+    nodeAction='move';
     editor.manualFocusContour?.(i);syncTool();renderContours();contourMenu.hidden=true;contourTitle?.setAttribute('aria-expanded','false');setStatus?.('Editing Contour '+(i+1),800);
+  }
+
+  function syncBezierTools(){
+    if(!bezierTools)return;
+    const node=currentTool()==='node'&&!paintMode;
+    bezierTools.hidden=!node;
+    if(!node)return;
+    const state=editor.manualSelectedAnchorState?.()||{selected:false};
+    for(const b of bezierButtons){
+      const action=b.dataset.bezierAction;
+      let active=false,stateOn=false;
+      if(action==='corner')stateOn=!!state.corner;
+      if(action==='smooth')stateOn=!!state.smooth&&!state.broken;
+      if(action==='mirror'){active=nodeAction==='handle'&&handleRelation==='mirror';stateOn=!!state.mirrored;}
+      if(action==='break'){active=nodeAction==='handle'&&handleRelation==='break';stateOn=!!state.broken;}
+      if(action==='add')active=nodeAction==='add';
+      b.classList.toggle('active',active);
+      b.classList.toggle('state-on',stateOn);
+      b.setAttribute('aria-pressed',active?'true':'false');
+      if(action!=='add'&&action!=='delete')b.disabled=!state.selected;
+      if(action==='delete')b.disabled=!state.selected;
+    }
+    if(handleSideWrap)handleSideWrap.hidden=nodeAction!=='handle';
+    for(const b of handleSideButtons){
+      const on=b.dataset.handleSide===handleSide;
+      b.classList.toggle('active',on);b.setAttribute('aria-pressed',on?'true':'false');
+    }
+  }
+  function selectBezierAction(action){
+    if(currentTool()!=='node')return;
+    if(action==='delete'){
+      if(editor.deleteNodeSelection?.()){nodeAction='move';syncBezierTools();updatePointState();}
+      return;
+    }
+    if(action==='corner'||action==='smooth'){
+      if(editor.manualSetSelectedAnchorType?.(action)){nodeAction='move';syncBezierTools();updatePointState();}
+      return;
+    }
+    if(action==='mirror'||action==='break'){
+      if(!editor.manualSelectedPathAnchor?.()){setStatus?.('Tap one anchor first.',1200);return;}
+      handleRelation=action;nodeAction='handle';
+      editor.manualSetHandleRelation?.(action,handleSide);
+      syncBezierTools();updatePointState();renderCrosshair();
+      setStatus?.(action==='mirror'?'Mirrored handles — swipe the pad.':'Broken handles — swipe one side independently.',1400);
+      return;
+    }
+    if(action==='add'){
+      nodeAction=nodeAction==='add'?'move':'add';
+      ensureCursor();renderCrosshair();syncBezierTools();updatePointState();
+      setStatus?.(nodeAction==='add'?'Add Point — move the crosshair onto a contour and tap.':'Add Point cancelled.',1400);
+    }
   }
 
   function updatePointState(){
@@ -210,12 +278,26 @@ export function installManualTraceUI({editor,setStatus}) {
     if(pointCount){
       if(currentTool()==='node'){
         const sel=editor.manualSelectedNodeCount?.()||0;
-        pointCount.textContent=sel?sel+' selected':'Select a point';
+        if(nodeAction==='add')pointCount.textContent='Add Point';
+        else if(nodeAction==='handle')pointCount.textContent=(handleRelation==='mirror'?'Mirror ':'Break ')+handleSide.toUpperCase();
+        else pointCount.textContent=sel?sel+' selected':'Select a point';
       }else pointCount.textContent=n+' point'+(n===1?'':'s');
     }
     if(closePath)closePath.disabled=n<3;
     if(finishPath)finishPath.disabled=n<2;
-    renderContours();refreshPaintChips();
+    if(padText){
+      if(currentTool()==='pen')padText.textContent='Swipe to position next point';
+      else if(nodeAction==='add')padText.textContent='Swipe to position new point';
+      else if(nodeAction==='handle')padText.textContent='Swipe to reshape '+handleSide.toUpperCase()+' handle';
+      else padText.textContent='Swipe to move point';
+    }
+    if(padHint){
+      if(currentTool()==='pen')padHint.textContent='Tap to add point';
+      else if(nodeAction==='add')padHint.textContent='Tap here when crosshair is on the contour';
+      else if(nodeAction==='handle')padHint.textContent=handleRelation==='mirror'?'Opposite handle mirrors automatically':'Only this handle moves';
+      else padHint.textContent=editor.manualSelectedNodeCount?.()?'Selected point follows your swipe':'Tap a node on canvas first';
+    }
+    renderContours();refreshPaintChips();syncBezierTools();
   }
   function syncTool(){
     const tool=currentTool(),editing=tool==='pen'||tool==='node',pen=tool==='pen',node=tool==='node';
@@ -230,19 +312,29 @@ export function installManualTraceUI({editor,setStatus}) {
       pad.hidden=!editing;
       if(contourDock)renderContours();
     }
-    if(padText)padText.textContent=pen?'Swipe to position next point':'Swipe to move point';
-    if(padHint)padHint.textContent=pen?'Tap to add point':(editor.manualSelectedNodeCount?.()?'Selected point follows your swipe':'Tap a node on canvas first');
     if(closePath)closePath.hidden=!pen;
     if(finishPath)finishPath.hidden=!pen;
-    if(pen){ensureCursor();renderCrosshair();}else clearCrosshair();
-    if(node&&editor.stage)editor.mountNodeHandles?.();
+    if(pen){nodeAction='move';ensureCursor();renderCrosshair();}
+    else if(node){editor.mountNodeHandles?.();renderCrosshair();}
+    else {nodeAction='move';clearCrosshair();}
     updatePointState();
   }
-  for(const b of toolButtons)b.addEventListener('click',()=>{closePaint();const tool=b.dataset.manualTool;editor._manualTraceTouchMode=touchModeFor(tool);editor.setTool(tool);syncTool();setStatus?.(names[tool]||tool,900);});
 
-  headBack?.addEventListener('click',()=>{closePaint();editor._manualTraceTouchMode=null;editor.setTool('select');syncTool();});
-  headUndo?.addEventListener('click',()=>{editor.undo?.();setTimeout(()=>{syncTool();renderContours();},0);});
-  headRedo?.addEventListener('click',()=>{editor.redoAction?.();setTimeout(()=>{syncTool();renderContours();},0);});
+  for(const b of toolButtons)b.addEventListener('click',()=>{
+    closePaint();const tool=b.dataset.manualTool;
+    if(tool!=='node')nodeAction='move';
+    editor._manualTraceTouchMode=touchModeFor(tool);editor.setTool(tool);syncTool();setStatus?.(names[tool]||tool,900);
+  });
+  for(const b of bezierButtons)b.addEventListener('click',()=>selectBezierAction(b.dataset.bezierAction));
+  for(const b of handleSideButtons)b.addEventListener('click',()=>{
+    handleSide=b.dataset.handleSide==='in'?'in':'out';
+    if(nodeAction==='handle'&&handleRelation==='mirror')editor.manualSetHandleRelation?.('mirror',handleSide);
+    syncBezierTools();updatePointState();
+  });
+
+  headBack?.addEventListener('click',()=>{closePaint();nodeAction='move';editor._manualTraceTouchMode=null;editor.setTool('select');syncTool();});
+  headUndo?.addEventListener('click',()=>{editor.undo?.();setTimeout(()=>{nodeAction='move';syncTool();renderContours();},0);});
+  headRedo?.addEventListener('click',()=>{editor.redoAction?.();setTimeout(()=>{nodeAction='move';syncTool();renderContours();},0);});
   paintBack?.addEventListener('click',closePaint);
   fillButton?.addEventListener('click',()=>openPaint('fill'));
   strokeButton?.addEventListener('click',()=>openPaint('stroke'));
@@ -262,7 +354,7 @@ export function installManualTraceUI({editor,setStatus}) {
   contourRange?.addEventListener('input',()=>focusContour(Number(contourRange.value)-1));
   addContour?.addEventListener('click',()=>{
     if(editor._pen)return;
-    if(currentTool()!=='pen'){editor._manualTraceTouchMode='pen';editor.setTool('pen');syncTool();}
+    if(currentTool()!=='pen'){nodeAction='move';editor._manualTraceTouchMode='pen';editor.setTool('pen');syncTool();}
     if(editor.manualStartContour?.()){contourMenu.hidden=true;contourTitle?.setAttribute('aria-expanded','false');updatePointState();renderCrosshair();setStatus?.('New contour — swipe, then tap to add points.',1500);}
     else setStatus?.('Select one editable path first.',1400);
   });
@@ -273,11 +365,17 @@ export function installManualTraceUI({editor,setStatus}) {
     if(currentTool()!=='pen'||!ensureCursor())return;
     if(editor.manualPenPlacePoint?.(cursor)){updatePointState();renderCrosshair();setStatus?.('Point added',550);}
   }
+  function addPointAtCursor(){
+    if(currentTool()!=='node'||nodeAction!=='add'||!ensureCursor())return false;
+    const ok=editor.manualAddPointAt?.(cursor);
+    if(ok){nodeAction='move';renderCrosshair();updatePointState();}
+    return !!ok;
+  }
 
   padSurface.addEventListener('pointerdown',(e)=>{
     if(!vectorMode()||activePointer||e.button!==0||paintMode)return;
     e.preventDefault();e.stopPropagation();
-    if(currentTool()==='pen')ensureCursor();
+    if(currentTool()==='pen'||nodeAction==='add')ensureCursor();
     activePointer={id:e.pointerId,startX:e.clientX,startY:e.clientY,lastX:e.clientX,lastY:e.clientY,cursorX:cursor.x,cursorY:cursor.y,moved:false,nodeMoved:false};
     try{padSurface.setPointerCapture(e.pointerId);}catch{}
     padSurface.classList.add('tracking');
@@ -288,13 +386,20 @@ export function installManualTraceUI({editor,setStatus}) {
     const totalDx=e.clientX-activePointer.startX,totalDy=e.clientY-activePointer.startY;
     if(Math.hypot(totalDx,totalDy)>5)activePointer.moved=true;
     const k=scale(),gain=.72;
-    if(currentTool()==='pen'){
+    if(currentTool()==='pen'||(currentTool()==='node'&&nodeAction==='add')){
       moveCursor(activePointer.cursorX+(totalDx/k)*gain,activePointer.cursorY+(totalDy/k)*gain);
     }else if(currentTool()==='node'&&activePointer.moved){
       const dx=((e.clientX-activePointer.lastX)/k)*gain,dy=((e.clientY-activePointer.lastY)/k)*gain;
-      if((dx||dy)&&editor.manualSelectedNodeCount?.()>0){
-        if(!nodeCoalescing){editor.beginCoalesce();nodeCoalescing=true;}
-        if(editor.manualMoveSelectedNodes?.(dx,dy))activePointer.nodeMoved=true;
+      if(dx||dy){
+        if(nodeAction==='handle'){
+          if(editor.manualSelectedNodeCount?.()===1){
+            if(!nodeCoalescing){editor.beginCoalesce();nodeCoalescing=true;}
+            if(editor.manualMoveSelectedHandle?.(handleSide,dx,dy,handleRelation==='mirror'))activePointer.nodeMoved=true;
+          }
+        }else if(editor.manualSelectedNodeCount?.()>0){
+          if(!nodeCoalescing){editor.beginCoalesce();nodeCoalescing=true;}
+          if(editor.manualMoveSelectedNodes?.(dx,dy))activePointer.nodeMoved=true;
+        }
       }
       activePointer.lastX=e.clientX;activePointer.lastY=e.clientY;
     }
@@ -305,22 +410,54 @@ export function installManualTraceUI({editor,setStatus}) {
     const tap=!activePointer.moved,nodeMoved=activePointer.nodeMoved;
     try{padSurface.releasePointerCapture(e.pointerId);}catch{}
     activePointer=null;padSurface.classList.remove('tracking');
-    if(nodeCoalescing){if(nodeMoved)editor.commitCoalesce('Move point');else editor.cancelCoalesce();nodeCoalescing=false;}
+    if(nodeCoalescing){
+      if(nodeMoved)editor.commitCoalesce(nodeAction==='handle'?(handleRelation==='mirror'?'Mirror handle':'Break handle'):'Move point');
+      else editor.cancelCoalesce();
+      nodeCoalescing=false;
+    }
     if(currentTool()==='pen'&&place&&tap)placePoint();
+    else if(currentTool()==='node'&&nodeAction==='add'&&place&&tap)addPointAtCursor();
     if(currentTool()==='node')updatePointState();
   };
-  padSurface.addEventListener('pointerup',(e)=>endPad(e,true));padSurface.addEventListener('pointercancel',(e)=>endPad(e,false));
-  padSurface.addEventListener('keydown',(e)=>{if((e.key==='Enter'||e.key===' ')&&currentTool()==='pen'){e.preventDefault();placePoint();}});
+  padSurface.addEventListener('pointerup',(e)=>endPad(e,true));
+  padSurface.addEventListener('pointercancel',(e)=>endPad(e,false));
+  padSurface.addEventListener('keydown',(e)=>{
+    if(e.key!=='Enter'&&e.key!==' ')return;
+    if(currentTool()==='pen'){e.preventDefault();placePoint();}
+    else if(currentTool()==='node'&&nodeAction==='add'){e.preventDefault();addPointAtCursor();}
+  });
 
   closePath?.addEventListener('click',()=>{if(editor.manualPenClose?.()){updatePointState();renderCrosshair();setStatus?.('Contour closed',900);}});
   finishPath?.addEventListener('click',()=>{if(editor.manualPenFinishOpen?.()){updatePointState();renderCrosshair();setStatus?.('Open contour finished',900);}});
 
-  const toolObserver=new MutationObserver(syncTool);toolObserver.observe(stageWrap,{attributes:true,attributeFilter:['data-tool']});
-  const stageObserver=new MutationObserver(()=>{renderContours();refreshPaintChips();});
-  if(editor.stage)stageObserver.observe(editor.stage,{subtree:true,attributes:true,attributeFilter:['d','fill','stroke','fill-opacity','stroke-opacity','stroke-width']});
+  // A canvas node tap changes editor._nodeSel rather than a normal DOM form value.
+  // Refresh the Control Pad state after the pointer finishes so Corner/Smooth/etc
+  // immediately light up for the anchor the user just picked.
+  const selectionRefresh=()=>{if(currentTool()==='node')setTimeout(()=>{syncBezierTools();updatePointState();},0);};
+  document.addEventListener('pointerup',selectionRefresh,true);
+
+  const toolObserver=new MutationObserver(syncTool);
+  toolObserver.observe(stageWrap,{attributes:true,attributeFilter:['data-tool']});
+  let observedStage=null;
+  const stageObserver=new MutationObserver(()=>{renderContours();refreshPaintChips();syncBezierTools();});
+  function observeStage(){
+    if(observedStage===editor.stage)return;
+    stageObserver.disconnect();observedStage=editor.stage;
+    if(observedStage)stageObserver.observe(observedStage,{subtree:true,attributes:true,attributeFilter:['d','fill','stroke','fill-opacity','stroke-opacity','stroke-width']});
+  }
+  observeStage();
 
   syncTool();refreshPaintChips();
-  return{syncTool,getCursor:()=>({...cursor}),placePoint,renderContours,openPaint,closePaint,
-    destroy(){toolObserver.disconnect();stageObserver.disconnect();paintCtl?.destroy?.();clearCrosshair();editor._manualTraceTouchMode=null;app?.classList.remove('manual-vector-mode','manual-pen-mode','manual-node-mode','manual-paint-open');}
+  return{
+    syncTool,
+    getCursor:()=>({...cursor}),
+    setCursor,
+    getBezierMode:()=>({nodeAction,handleRelation,handleSide}),
+    placePoint,renderContours,openPaint,closePaint,
+    destroy(){
+      toolObserver.disconnect();stageObserver.disconnect();document.removeEventListener('pointerup',selectionRefresh,true);
+      paintCtl?.destroy?.();clearCrosshair();editor._manualTraceTouchMode=null;
+      app?.classList.remove('manual-vector-mode','manual-pen-mode','manual-node-mode','manual-paint-open');
+    }
   };
 }
