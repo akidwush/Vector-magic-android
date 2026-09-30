@@ -109,6 +109,25 @@ export const nodeMixin = {
     ov.appendChild(g);
   },
   _nodeKey(nd) { return nd.id + "#" + nd.k; },
+  manualSelectedNodeCount() {
+    return this._nodeSel ? this._nodeSel.size : 0;
+  },
+  manualMoveSelectedNodes(dx, dy) {
+    if (this.tool !== "node" || !this._nodeSel?.size || !this._nodeEls) return false;
+    const mx = Number(dx), my = Number(dy);
+    if (!Number.isFinite(mx) || !Number.isFinite(my) || (!mx && !my)) return false;
+    let moved = false;
+    for (const key of this._nodeSel) {
+      const ent = this._nodeEls.get(key);
+      if (!ent) continue;
+      const nx = ent.nd.x + mx, ny = ent.nd.y + my;
+      ent.nd.moveTo(nx, ny);
+      this._syncNodeEls(ent, nx, ny);
+      moved = true;
+    }
+    if (moved) this._renderInspector?.();
+    return moved;
+  },
   _refreshNodeSelHighlight() {
     if (!this._nodeEls) return;
     for (const [key, ent] of this._nodeEls) ent.rect.classList.toggle("selected", this._nodeSel.has(key));
