@@ -1,0 +1,89 @@
+name: Import Vector Studio source ZIP
+
+on:
+  push:
+    paths:
+      - "Vector-Studio-Netlify-Source.zip"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: import-vector-studio-source
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify exact source archive and unpack safely
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s Vector-Studio-Netlify-Source.zip
+          printf '%s  %s\n' \
+            'fd114e3c1ad853ac0700ced9f64c7b88189a07f9d057b71ce18383b61942b12c' \
+            'Vector-Studio-Netlify-Source.zip' | sha256sum --check
+          python - <<'PY'
+          from zipfile import ZipFile
+          from pathlib import PurePosixPath, Path
+          archive = Path("Vector-Studio-Netlify-Source.zip")
+          directory = Path("/tmp/vector-studio-import")
+          directory.mkdir(parents=True, exist_ok=True)
+          with ZipFile(archive) as z:
+              files = [entry for entry in z.infolist() if not entry.is_dir()]
+              assert len(files) == 106, f"Expected 106 source files, found {len(files)}"
+              for entry in files:
+                  path = PurePosixPath(entry.filename)
+                  assert path.parts[0] == "vector-studio" and ".." not in path.parts
+                  assert not path.is_absolute() and not ((entry.external_attr >> 16) & 0o170000) == 0o120000
+              z.extractall(directory)
+          print(f"Verified {len(files)} source files")
+          PY
+          test -s /tmp/vector-studio-import/vector-studio/src/trace/client.js
+          test -s /tmp/vector-studio-import/vector-studio/netlify/functions/trace.mjs
+          test -s /tmp/vector-studio-import/vector-studio/src/app.js
+          # The CI workflow is preinstalled with identical bytes.
+          cmp /tmp/vector-studio-import/vector-studio/.github/workflows/check.yml \
+            .github/workflows/check.yml
+      - name: Test source before publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/vector-studio-import/vector-studio
+          node tests/trace-backend.mjs
+          node tests/trace-preprocess.mjs
+          node --check src/trace/ui.js
+          node --check src/trace/import.js
+          node --check src/trace/sanitize.js
+          bash scripts/build-netlify.sh
+          test -s dist/index.html
+          test -s dist/src/trace/ui.js
+          test -s dist/studio.css
+          test ! -e dist/netlify
+      - name: Publish verified complete source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rsync -a \
+            --exclude='.github/workflows/' \
+            --exclude='dist/' \
+            /tmp/vector-studio-import/vector-studio/ "$GITHUB_WORKSPACE/"
+          # The ZIP isn't retained in the live source tree after successful import.
+          rm -f Vector-Studio-Netlify-Source.zip
+          git add -A
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --cached --quiet; then
+            git commit -m "feat: import tested Vector Studio Netlify source"
+            git push origin HEAD:main
+          fi
