@@ -1,5 +1,6 @@
 import {traceImage,TRACE_DEFAULTS} from './client.js';
 import {importTraceSvg} from './import.js';
+import {normalizePickedImage,blobDataUrl,MAX_FILE_BYTES} from './preprocess.js';
 
 export function installTraceUI({setStatus,downloadCurrentSvg}){
   const launch=document.querySelector('#studio-trace-button');
@@ -17,14 +18,15 @@ export function installTraceUI({setStatus,downloadCurrentSvg}){
   const noise=dialog.querySelector('#studio-trace-noise');
   const challenge=dialog.querySelector('#studio-trace-challenge');
   let file=null,controller=null,previewURL=null,siteKey=null,widget=null,seq=0,widgetLoading=null;
+  let loadingFile=false,fileSeq=0;
   const say=(s)=>{status.textContent=s;};
-  const update=()=>{const busy=!!controller;pick.disabled=busy;start.disabled=busy||!file;
-    stop.hidden=!busy;start.hidden=busy;detail.disabled=smooth.disabled=noise.disabled=busy;};
+  const update=()=>{const busy=!!controller;pick.disabled=busy||loadingFile;start.disabled=busy||loadingFile||!file;
+    stop.hidden=!busy;start.hidden=busy;detail.disabled=smooth.disabled=noise.disabled=busy||loadingFile;};
   const safeExit=()=>{
-    seq++;
+    seq++;fileSeq++;loadingFile=false;
     if(controller){controller.abort();controller=null;}
     if(previewURL){URL.revokeObjectURL(previewURL);previewURL=null;}
-    preview.removeAttribute('src');preview.hidden=true;file=null;upload.value='';
+    preview.onload=null;preview.onerror=null;preview.removeAttribute('src');preview.hidden=true;file=null;upload.value='';
     if(widget!==null&&window.turnstile){window.turnstile.remove(widget);widget=null;}
     challenge.replaceChildren();dialog.hidden=true;update();
   };
@@ -94,13 +96,40 @@ export function installTraceUI({setStatus,downloadCurrentSvg}){
   });
   upload.addEventListener('change',async()=>{
     const selected=upload.files?.[0];if(!selected)return;
-    if(!['image/png','image/jpeg','image/webp'].includes(selected.type)||selected.size>12*1024*1024){
-      say('Pilih PNG/JPG/WebP dengan ukuran maksimal 12 MB.');return;
+    const chosen=++fileSeq;
+    if(selected.size>MAX_FILE_BYTES){
+      file=null;say('Gagal: Gambar maksimal 12 MB.');update();return;
     }
-    file=selected;
-    if(previewURL)URL.revokeObjectURL(previewURL);
-    previewURL=URL.createObjectURL(selected);preview.src=previewURL;preview.hidden=false;
-    say(`Siap: ${selected.name}. Tekan Trace Image untuk mulai.`);update();
+    loadingFile=true;file=null;update();
+    if(previewURL){URL.revokeObjectURL(previewURL);previewURL=null;}
+    preview.onload=null;preview.onerror=null;preview.removeAttribute('src');preview.hidden=true;
+    say('Membaca file dari penyimpanan Android…');
+    try{
+      // Copy the bytes immediately. Android content-provider Files can become
+      // unreadable after the picker callback even though name/type still exist.
+      const normalized=await normalizePickedImage(selected);
+      if(chosen!==fileSeq||dialog.hidden)return;
+      file=normalized;
+      preview.hidden=false;
+      try{
+        previewURL=URL.createObjectURL(normalized);
+        preview.onerror=async()=>{
+          if(file!==normalized||dialog.hidden)return;
+          preview.onerror=null;
+          if(previewURL){URL.revokeObjectURL(previewURL);previewURL=null;}
+          try{preview.src=await blobDataUrl(normalized);}
+          catch{say('Gambar terbaca, tetapi pratinjau Android gagal. Trace masih bisa dicoba.');}
+        };
+        preview.src=previewURL;
+      }catch{
+        preview.src=await blobDataUrl(normalized);
+      }
+      say(`Siap: ${normalized.name||selected.name} · ${normalized.type}. Tekan Trace Image untuk mulai.`);
+    }catch(err){
+      if(chosen===fileSeq){file=null;say('Gagal: '+(err?.message||'File gambar tidak dapat dibaca.'));}
+    }finally{
+      if(chosen===fileSeq){loadingFile=false;update();}
+    }
   });
   window.vectorStudio={openTrace:open,closeTrace:safeExit,traceFile:file=>{
     // Small testing/automation seam; no bypass of sanitizer or actual network handler.

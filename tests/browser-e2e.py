@@ -37,7 +37,7 @@ def mount_embedded_app(page):
         html=html.replace('<link rel="stylesheet" href="/'+css+'" />',
                           '<style>'+ (root/'web'/css).read_text()+'</style>')
     html=html.replace('<script type="module" src="/src/app.js"></script>',
-      '<script type="importmap">'+json.dumps({'imports':mapping})+'</script>'+ 
+      '<script type="importmap">'+json.dumps({'imports':mapping})+'</script>'+
       '<script type="module">import("@vs/src/app.js").catch(e=>{window.__moduleError=e.stack||String(e);console.error(e.stack||e);});</script>')
     page.set_content(html,wait_until='domcontentloaded')
 
@@ -79,8 +79,24 @@ with sync_playwright() as p:
     else: page.goto(URL,wait_until='domcontentloaded',timeout=20000)
     page.locator('main.app').wait_for(state='visible',timeout=15000)
     page.wait_for_function('!!window.editor?.stage && !!window.vectorStudio',timeout=18000)
+    if width==412:
+      # Reproduce the Android failure reported from the live site: createImageBitmap
+      # rejects and image blob: URLs fail. The third data-URL decoder must still work.
+      page.evaluate("""() => {
+        window.createImageBitmap=async()=>{throw new Error('simulated Android bitmap decoder failure')};
+        const real=URL.createObjectURL.bind(URL);
+        URL.createObjectURL=(blob)=>{
+          if (blob && typeof blob.type==='string' && blob.type.startsWith('image/'))
+            return 'blob:https://invalid.invalid/vector-studio-android';
+          return real(blob);
+        };
+      }""")
     page.locator('#studio-trace-button').click()
     page.locator('#studio-trace-file').set_input_files(FILE)
+    page.wait_for_function("!document.querySelector('#studio-trace-run').disabled",timeout=10000)
+    if width==412:
+      page.wait_for_function("document.querySelector('#studio-trace-original').src.startsWith('data:image/')",timeout=10000)
+      print('PASS Android decoder fallback: detached bytes + data URL preview/decoder')
     page.locator('#studio-trace-run').click()
     page.locator('#studio-trace-dialog').wait_for(state='hidden',timeout=18000)
     doc=page.evaluate('''() => ({count:document.querySelectorAll('svg.inline-svg path').length,
@@ -106,11 +122,12 @@ with sync_playwright() as p:
       print('PASS SVG sanitization: removed script, event handlers, remote paint URLs')
 
     if width==390:
-      page.screenshot(path='/mnt/data/vector-studio-canvas-preview.png')
+      page.screenshot(path='/tmp/vector-studio-canvas-preview.png')
       # Existing drawing must not be destroyed, defs must be re-minted for new import.
       page.evaluate("window.editor.placeSvgMarkup('<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 120 100\"><rect x=\"3\" y=\"4\" width=\"11\" height=\"12\" fill=\"#ff3344\"/></svg>', 'user-shape')")
       before=page.evaluate('window.editor.stage.querySelectorAll("rect:not(.hv-artboard)").length')
       page.locator('#studio-trace-button').click();page.locator('#studio-trace-file').set_input_files(FILE)
+      page.wait_for_function("!document.querySelector('#studio-trace-run').disabled",timeout=10000)
       page.locator('#studio-trace-run').click()
       page.locator('#studio-trace-dialog').wait_for(state='hidden',timeout=18000)
       after=page.evaluate(r'''() => ({beforeRect:window.editor.stage.querySelectorAll('rect:not(.hv-artboard)').length,
