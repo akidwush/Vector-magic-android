@@ -122,7 +122,7 @@ with sync_playwright() as p:
       print('PASS SVG sanitization: removed script, event handlers, remote paint URLs')
 
     if width==390:
-      page.screenshot(path='/mnt/data/vector-studio-canvas-preview.png')
+      page.screenshot(path='/tmp/vector-studio-canvas-preview.png')
       # Existing drawing must not be destroyed, defs must be re-minted for new import.
       page.evaluate("window.editor.placeSvgMarkup('<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 120 100\"><rect x=\"3\" y=\"4\" width=\"11\" height=\"12\" fill=\"#ff3344\"/></svg>', 'user-shape')")
       before=page.evaluate('window.editor.stage.querySelectorAll("rect:not(.hv-artboard)").length')
