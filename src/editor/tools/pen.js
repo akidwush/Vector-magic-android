@@ -11,6 +11,61 @@ import { setStatus } from "../../app.js";
 import { snapPoint, snap45 } from "../snap.js";
 
 export const penMixin = {
+  // Resolve the current Vector Layer. A single selected SVG path wins; otherwise
+  // keep using the last manual layer while it still exists in the document.
+  manualVectorLayerTarget() {
+    const selected = this.selectedNodes?.().filter((n) => n?.tagName?.toLowerCase() === "path") || [];
+    if (selected.length === 1) {
+      const id = selected[0].getAttribute("data-hv-id");
+      if (id) this._manualVectorLayerId = id;
+      return selected[0];
+    }
+    const remembered = this._manualVectorLayerId ? this.nodeById(this._manualVectorLayerId) : null;
+    return remembered?.tagName?.toLowerCase() === "path" ? remembered : null;
+  },
+  manualVectorLayerContours() {
+    const node = this.manualVectorLayerTarget();
+    if (!node) return { node: null, contours: [], editable: false, active: -1 };
+    const pa = pathToAnchors(node);
+    const id = node.getAttribute("data-hv-id");
+    const active = this._manualContourFocus?.id === id ? this._manualContourFocus.sub : 0;
+    return {
+      node,
+      editable: !!pa.editable,
+      active: Math.max(0, Math.min(Math.max(0, pa.subs.length - 1), active || 0)),
+      contours: pa.subs.map((u, i) => ({ index: i, closed: !!u.closed, count: u.count }))
+    };
+  },
+  manualFocusContour(index) {
+    const info = this.manualVectorLayerContours();
+    if (!info.node || !info.contours.length) return false;
+    const sub = Math.max(0, Math.min(info.contours.length - 1, Number(index) || 0));
+    const id = info.node.getAttribute("data-hv-id");
+    this._manualVectorLayerId = id;
+    this._manualContourFocus = { id, sub };
+    this.selection = new Set([id]); this.artboardSelected = false;
+    this._renderSelection();
+    if (this.tool === "node") this.mountNodeHandles();
+    return true;
+  },
+  manualStartContour() {
+    if (this._pen || this.tool !== "pen") return false;
+    const info = this.manualVectorLayerContours();
+    if (!info.node || !info.editable || !info.contours.length) return false;
+    this.beginCoalesce();
+    const baseD = info.node.getAttribute("d") || "";
+    const id = info.node.getAttribute("data-hv-id");
+    this._manualVectorLayerId = id;
+    this._manualContourFocus = { id, sub: info.contours.length };
+    this.selection = new Set([id]); this.artboardSelected = false; this._renderSelection();
+    this._pen = {
+      node: info.node, pts: [], closed: false, dragging: false,
+      manual: true, contourAppend: true, baseD
+    };
+    this._redrawPen();
+    this._renderPenMarks();
+    return true;
+  },
   // Manual-trace bridge used by the Android Control Pad. It writes through the
   // SAME _pen state and _finishPen() path as the normal Pen tool, so history,
   // styling and SVG serialization stay identical. Screen touches never need to
@@ -236,7 +291,9 @@ export const penMixin = {
   },
   _redrawPen(preview) {
     if (!this._pen) return;
-    this._pen.node.setAttribute("d", penPathD(this._pen.pts, this._pen.closed, preview));
+    const draft = penPathD(this._pen.pts, this._pen.closed, preview);
+    const prefix = this._pen.contourAppend ? String(this._pen.baseD || "").trim() : "";
+    this._pen.node.setAttribute("d", prefix && draft ? prefix + " " + draft : (prefix || draft));
   },
   _penNearFirst(pt) {
     const f = this._pen.pts[0]; if (!f) return false;
@@ -281,9 +338,32 @@ export const penMixin = {
     if (!this._pen) return;
     if (this._penHoverBound) { window.removeEventListener("pointermove", this._penHoverBound); this._penHoverBound = null; }
     this._setPenCloseCursor(false);
-    const { node, pts, closed, continued } = this._pen;
+    const { node, pts, closed, continued, manual, contourAppend, baseD } = this._pen;
     const ov = this._overlayEl(); if (ov) ov.querySelectorAll("g.hv-pen").forEach((g) => g.remove());
     this._pen = null;
+    if (contourAppend) {
+      const id = node.getAttribute("data-hv-id");
+      if (!keep || pts.length < 2) {
+        node.setAttribute("d", baseD || "");
+        this.cancelCoalesce();
+        if (id) this.selection = new Set([id]);
+        this._renderSelection(); this._renderInspector(); this._renderLayers();
+        return;
+      }
+      const extra = penPathD(pts, closed, null);
+      node.setAttribute("d", (String(baseD || "").trim() + " " + extra).trim());
+      this.commitCoalesce("Add contour");
+      if (id) {
+        this._manualVectorLayerId = id;
+        const pa = pathToAnchors(node);
+        this._manualContourFocus = { id, sub: Math.max(0, pa.subs.length - 1) };
+        this.selection = new Set([id]);
+      }
+      this.artboardSelected = false;
+      this._renderSelection(); this._renderInspector(); this._renderLayers();
+      setStatus(closed ? "Contour added." : "Open contour added.", 1500);
+      return;
+    }
     if (continued) {
       // resumed an existing path — keep its id/style, just re-serialize the geometry
       node.setAttribute("d", penPathD(pts, closed, null));
@@ -305,6 +385,10 @@ export const penMixin = {
     const id = "n" + (++this.idSeq); node.setAttribute("data-hv-id", id);
     this.commitCoalesce("Pen path");
     this.selection = new Set([id]); this.artboardSelected = false;
+    if (manual) {
+      this._manualVectorLayerId = id;
+      this._manualContourFocus = { id, sub: 0 };
+    }
     this._renderSelection(); this._renderInspector(); this._renderLayers();
     setStatus(closed ? "Closed path added." : "Path added.", 1500);
   },
