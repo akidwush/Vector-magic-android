@@ -45,11 +45,22 @@ public abstract class NexoraWebActivity extends Activity {
     private void configureWebView() {
         webView=new WebView(this); webView.setBackgroundColor(Color.rgb(9,3,18)); setContentView(webView);
         boolean debug=(getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE)!=0; WebView.setWebContentsDebuggingEnabled(debug);
-        WebSettings s=webView.getSettings(); s.setJavaScriptEnabled(true); s.setDomStorageEnabled(true); s.setDatabaseEnabled(true); s.setAllowFileAccess(false); s.setAllowContentAccess(true); s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW); s.setCacheMode(WebSettings.LOAD_DEFAULT); s.setMediaPlaybackRequiresUserGesture(false); s.setSupportMultipleWindows(false); s.setUserAgentString(s.getUserAgentString()+" NEXORA-Android/1.0");
+        WebSettings s=webView.getSettings();
+        s.setJavaScriptEnabled(true); s.setDomStorageEnabled(true); s.setDatabaseEnabled(true);
+        s.setAllowFileAccess(false); s.setAllowContentAccess(true); s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        s.setCacheMode(WebSettings.LOAD_DEFAULT); s.setMediaPlaybackRequiresUserGesture(false); s.setSupportMultipleWindows(false);
+        s.setTextZoom(90); s.setUseWideViewPort(true); s.setLoadWithOverviewMode(false);
+        s.setSupportZoom(false); s.setBuiltInZoomControls(false); s.setDisplayZoomControls(false);
+        s.setUserAgentString(s.getUserAgentString()+" NEXORA-Android/1.1");
         if (Build.VERSION.SDK_INT>=Build.VERSION_CODES.O) s.setSafeBrowsingEnabled(true);
         CookieManager cm=CookieManager.getInstance(); cm.setAcceptCookie(true); cm.setAcceptThirdPartyCookies(webView,true);
         webView.setWebChromeClient(new WebChromeClient(){@Override public boolean onShowFileChooser(WebView v,ValueCallback<Uri[]> cb,FileChooserParams p){if(fileChooserCallback!=null)fileChooserCallback.onReceiveValue(null);fileChooserCallback=cb;try{Intent i=p.createIntent();startActivityForResult(i,FILE_CHOOSER_REQUEST);return true;}catch(Exception e){fileChooserCallback=null;Toast.makeText(NexoraWebActivity.this,"Pemilih file tidak tersedia.",Toast.LENGTH_SHORT).show();return false;}}});
-        webView.setWebViewClient(new WebViewClient(){@Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){return handleNavigation(r.getUrl());}@Override public boolean shouldOverrideUrlLoading(WebView v,String u){return handleNavigation(Uri.parse(u));}@Override public void onReceivedError(WebView v,WebResourceRequest r,WebResourceError e){if(r.isForMainFrame())loadOfflineFallback();}});
+        webView.setWebViewClient(new WebViewClient(){
+            @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){return handleNavigation(r.getUrl());}
+            @Override public boolean shouldOverrideUrlLoading(WebView v,String u){return handleNavigation(Uri.parse(u));}
+            @Override public void onPageFinished(WebView v,String url){super.onPageFinished(v,url);v.evaluateJavascript("(function(){var id='nexora-android-text-fix';if(document.getElementById(id))return;var s=document.createElement('style');s.id=id;s.textContent='html{-webkit-text-size-adjust:100%!important;text-size-adjust:100%!important;}';(document.head||document.documentElement).appendChild(s);})();",null);}
+            @Override public void onReceivedError(WebView v,WebResourceRequest r,WebResourceError e){if(r.isForMainFrame())loadOfflineFallback();}
+        });
         webView.setDownloadListener((url,ua,cd,mime,len)->{if(url==null||!(url.startsWith("https://")||url.startsWith("http://"))){Toast.makeText(this,"Download blob/lokal belum didukung.",Toast.LENGTH_LONG).show();return;}if(Build.VERSION.SDK_INT<=Build.VERSION_CODES.P&&checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},STORAGE_PERMISSION_REQUEST);Toast.makeText(this,"Izinkan penyimpanan lalu ulangi download.",Toast.LENGTH_SHORT).show();return;}enqueueDownload(url,ua,cd,mime);});
     }
     private boolean handleNavigation(Uri uri){if(uri==null)return true;String scheme=uri.getScheme()==null?"":uri.getScheme().toLowerCase();if("https".equals(scheme)||"http".equals(scheme)){if(isNavigationAllowed(uri))return false;if(shouldUseBlockedFallback(uri)){webView.loadUrl(blockedNavigationFallback());Toast.makeText(this,"Dashboard admin dipisahkan dari aplikasi publik.",Toast.LENGTH_SHORT).show();return true;}openExternal(uri);return true;}if("mailto".equals(scheme)||"tel".equals(scheme)||"sms".equals(scheme)||"whatsapp".equals(scheme)){openExternal(uri);return true;}webView.loadUrl(blockedNavigationFallback());return true;}
