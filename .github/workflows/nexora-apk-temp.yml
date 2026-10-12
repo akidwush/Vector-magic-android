@@ -1,0 +1,44 @@
+name: NEXORA APK Temporary Build
+on:
+  push:
+    branches: [build/nexora-apk-temp]
+    paths: ['nexora-apk-build/**','.github/workflows/nexora-apk-temp.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Prepare Android SDK
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Install Gradle 8.9
+        run: |
+          curl -fsSL --retry 3 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/gradle-8.9/bin" >> "$GITHUB_PATH"
+      - name: Build APKs
+        working-directory: nexora-apk-build
+        run: gradle --no-daemon --stacktrace :publicapp:assembleDebug :adminapp:assembleDebug
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp nexora-apk-build/publicapp/build/outputs/apk/debug/publicapp-debug.apk dist/NEXORA-Public.apk
+          cp nexora-apk-build/adminapp/build/outputs/apk/debug/adminapp-debug.apk dist/NEXORA-Admin.apk
+          sha256sum dist/*.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NEXORA-Android-APKs
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
